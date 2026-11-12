@@ -28,7 +28,8 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(middleware.Recovery(), middleware.RequestLog(), middleware.CORS())
+	// Recovery 最外层兜 panic;RequestID → AccessLog 顺序保证访问日志携带 request_id
+	r.Use(middleware.Recovery(), middleware.RequestID(), middleware.AccessLog(), middleware.CORS())
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
