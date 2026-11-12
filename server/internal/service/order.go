@@ -79,7 +79,7 @@ func CalcOrderAmount(items []model.OrderItem) (int64, error) {
 type PlaceReq struct {
 	Receiver string `json:"receiver" binding:"required,min=2,max=32"`
 	Phone    string `json:"phone" binding:"required,len=11,numeric"`
-	Address  string `json:"address" binding:"required,min=5,max=255"`
+	Address  string `json:"address" binding:"required,min=2,max=255"`
 	Remark   string `json:"remark" binding:"max=200"`
 }
 

@@ -35,8 +35,8 @@ async function submit() {
     toast('请填写 11 位手机号', 'warning')
     return
   }
-  if (f.address.trim().length < 5) {
-    toast('请填写详细地址', 'warning')
+  if (f.address.trim().length < 2) {
+    toast('请填写收货地址', 'warning')
     return
   }
   if (items.value.length === 0) {
@@ -84,7 +84,7 @@ async function submit() {
               v-model="form.address"
               type="textarea"
               :rows="2"
-              placeholder="省 / 市 / 区 / 详细地址"
+              placeholder="省市区 + 详细地址,如:广东省茂名市茂南区幸福路 88 号"
               maxlength="255"
             />
           </el-form-item>
