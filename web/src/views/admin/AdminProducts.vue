@@ -346,6 +346,15 @@ function onPageChange(p: number) {
             <el-switch v-model="form.data.status" :active-value="1" :inactive-value="0" active-text="上架" inactive-text="下架" />
           </el-form-item>
         </div>
+        <el-form-item label="店长推荐">
+          <el-switch
+            v-model="form.data.recommended"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="加入首页推荐位"
+            inactive-text="不推荐"
+          />
+        </el-form-item>
         <div class="form-row">
           <el-form-item label="面料材质" required>
             <el-input v-model="form.data.material" maxlength="64" placeholder="如:100% 精梳棉" />
