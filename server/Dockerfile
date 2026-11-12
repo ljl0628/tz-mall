@@ -28,8 +28,11 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 COPY --from=builder /out/fawn-server ./fawn-server
 # 镜像内只内置示例配置作为兜底默认值;真实配置经 APP_* 环境变量注入
-# (docker-compose.yml),密钥不进镜像。logs 目录挂载宿主机时在此写入。
+# (docker-compose.yml),密钥不进镜像。
 COPY config/config.example.yaml ./config/config.yaml
+
+# 日志目录提前建好并归属运行用户:命名卷首次挂载会继承此属主,否则 app 无法写入
+RUN mkdir -p /app/logs && chown app:app /app/logs
 
 USER app
 EXPOSE 8080

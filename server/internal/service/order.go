@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/mq"
 	"fawn-mall/internal/repository"
@@ -158,7 +160,8 @@ func (s *OrderService) Place(ctx context.Context, userID uint64, req PlaceReq) (
 	if err := s.pub.Publish(ctx, mq.QueueOrderCreate, msg); err != nil {
 		// 发布失败:回补 Redis 预扣库存,保证不白白占用
 		if rerr := s.stock.RefundBatch(ctx, stockItems); rerr != nil {
-			logger.Error("下单 MQ 发布失败且回补库存失败,请人工核对", "order_no", orderNo, "err", rerr)
+			logger.Error(ctx, "下单 MQ 发布失败且回补库存失败,请人工核对",
+				zap.String("order_no", orderNo), zap.Error(rerr))
 		}
 		return nil, fmt.Errorf("下单失败,请稍后重试: %w", err)
 	}
@@ -169,11 +172,13 @@ func (s *OrderService) Place(ctx context.Context, userID uint64, req PlaceReq) (
 		fields = append(fields, c.Field())
 	}
 	if err := s.cart.RemoveFields(ctx, userID, fields); err != nil {
-		logger.Warn("下单成功但清理购物车失败", "order_no", orderNo, "err", err)
+		logger.Warn(ctx, "下单成功但清理购物车失败",
+			zap.String("order_no", orderNo), zap.Error(err))
 	}
 
-	logger.Info("下单受理成功,等待 MQ 消费落库",
-		"order_no", orderNo, "user_id", userID, "total", total, "items", len(items))
+	logger.Info(ctx, "下单受理成功,等待 MQ 消费落库",
+		zap.String("order_no", orderNo), zap.Uint64("user_id", userID),
+		zap.Int64("total", total), zap.Int("items", len(items)))
 	return &PlaceResp{OrderNo: orderNo, TotalAmount: total}, nil
 }
 
@@ -214,7 +219,8 @@ func (s *OrderService) Pay(ctx context.Context, userID uint64, orderNo string) (
 	if !ok {
 		return nil, resp.ErrOrderStatus // 已支付过 / 已取消(可能刚好被延迟任务取消)
 	}
-	logger.Info("模拟支付成功", "order_no", orderNo, "user_id", userID, "amount", order.PayAmount)
+	logger.Info(ctx, "模拟支付成功", zap.String("order_no", orderNo),
+		zap.Uint64("user_id", userID), zap.Int64("amount", order.PayAmount))
 	return s.orders.GetByOrderNo(orderNo, true)
 }
 
@@ -287,11 +293,11 @@ func (s *OrderService) CancelIfUnpaid(ctx context.Context, orderNo, reason strin
 		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 	}
 	if rerr != nil {
-		logger.Error("订单已取消但 Redis 库存回补失败,请人工核对",
-			"order_no", orderNo, "err", rerr)
+		logger.Error(ctx, "订单已取消但 Redis 库存回补失败,请人工核对",
+			zap.String("order_no", orderNo), zap.Error(rerr))
 	} else {
-		logger.Info("订单取消完成,MySQL 与 Redis 库存已回补",
-			"order_no", orderNo, "reason", reason)
+		logger.Info(ctx, "订单取消完成,MySQL 与 Redis 库存已回补",
+			zap.String("order_no", orderNo), zap.String("reason", reason))
 	}
 	return true, nil
 }

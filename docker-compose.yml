@@ -78,8 +78,11 @@ services:
       APP_DB_NAME: ${MYSQL_DATABASE:-fawn_mall}
       APP_REDIS_ADDR: redis:6379
       APP_RABBITMQ_URL: amqp://${RABBITMQ_USER:-fawn}:${RABBITMQ_PASSWORD:-fawn_dev_123}@rabbitmq:5672/
+      APP_LOG_FORMAT: json # 容器内日志走文件(JSON,经下方挂载持久化),stdout 保持安静
     ports:
       - "8080:8080"
+    volumes:
+      - fawn-server-logs:/app/logs # zap + lumberjack 切割日志落盘,容器重建不丢历史
     depends_on:
       mysql:
         condition: service_healthy
@@ -103,3 +106,4 @@ volumes:
   fawn-mysql-data:
   fawn-redis-data:
   fawn-rabbitmq-data:
+  fawn-server-logs:

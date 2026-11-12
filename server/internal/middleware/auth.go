@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"fawn-mall/pkg/jwtx"
 	"fawn-mall/pkg/logger"
@@ -33,24 +34,27 @@ func CORS() gin.HandlerFunc {
 }
 
 // RequestLog 请求访问日志(方法/路径/状态/耗时)。
+// 过渡实现:步骤 3 将升级为 RequestID + AccessLog 中间件(带 request_id、按状态码分级)。
 func RequestLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		logger.Info("http",
-			"method", c.Request.Method,
-			"path", c.Request.URL.Path,
-			"status", c.Writer.Status(),
-			"cost_ms", time.Since(start).Milliseconds(),
-			"ip", c.ClientIP(),
+		logger.Info(c.Request.Context(), "http",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.Int("status", c.Writer.Status()),
+			zap.Int64("latency_ms", time.Since(start).Milliseconds()),
+			zap.String("ip", c.ClientIP()),
 		)
 	}
 }
 
 // Recovery 统一 panic 恢复,输出 JSON 错误而非断连。
+// 过渡实现:步骤 3 将升级为带 zap.Stack 的统一 500 恢复中间件。
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, rec any) {
-		logger.Error("panic recovered", "path", c.Request.URL.Path, "panic", rec)
+		logger.Error(c.Request.Context(), "panic recovered",
+			zap.String("path", c.Request.URL.Path), zap.Any("panic", rec))
 		c.AbortWithStatusJSON(200, resp.Body{Code: resp.CodeServerError, Msg: "服务开小差了,请稍后重试"})
 	})
 }

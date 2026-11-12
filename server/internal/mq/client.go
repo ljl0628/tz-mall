@@ -13,6 +13,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.uber.org/zap"
 
 	"fawn-mall/pkg/logger"
 )
@@ -81,7 +82,7 @@ func (c *Client) Run(ctx context.Context) {
 			return
 		}
 		if err := c.connectOnce(); err != nil {
-			logger.Error("RabbitMQ 连接失败,稍后重试", "err", err)
+			logger.Error(ctx, "RabbitMQ 连接失败,稍后重试", zap.Error(err))
 			select {
 			case <-ctx.Done():
 				return
@@ -89,7 +90,7 @@ func (c *Client) Run(ctx context.Context) {
 			}
 			continue
 		}
-		logger.Info("RabbitMQ 已连接", "delay_ttl_ms", c.delayTTL)
+		logger.Info(ctx, "RabbitMQ 已连接", zap.Int("delay_ttl_ms", c.delayTTL))
 
 		// 启动全部已注册消费者
 		c.mu.Lock()
@@ -115,7 +116,7 @@ func (c *Client) Run(ctx context.Context) {
 			wg.Wait()
 			return
 		case <-connClose:
-			logger.Warn("RabbitMQ 连接断开,准备重连")
+			logger.Warn(ctx, "RabbitMQ 连接断开,准备重连")
 			c.setHealthy(false)
 			wg.Wait()
 			select {
@@ -208,7 +209,8 @@ func (c *Client) PublishRaw(ctx context.Context, queue string, body []byte, head
 			return nil
 		}
 		lastErr = err
-		logger.Warn("MQ 发布失败,尝试重连后重发", "queue", queue, "attempt", attempt+1, "err", err)
+		logger.Warn(ctx, "MQ 发布失败,尝试重连后重发",
+			zap.String("queue", queue), zap.Int("attempt", attempt+1), zap.Error(err))
 		c.forceReconnect()
 		select {
 		case <-ctx.Done():
@@ -272,26 +274,27 @@ func (c *Client) consume(ctx context.Context, queue string, h Handler) {
 		}
 		// Qos 必须在 Consume 之前设置,prefetch=1 保证逐条手动 ack
 		if err := ch.Qos(1, 0, false); err != nil {
-			logger.Error("MQ 设置 Qos 失败", "queue", queue, "err", err)
+			logger.Error(ctx, "MQ 设置 Qos 失败", zap.String("queue", queue), zap.Error(err))
 			return
 		}
 		deliveries, err := ch.Consume(queue, "", false, false, false, false, nil)
 		if err != nil {
-			logger.Error("MQ 消费启动失败", "queue", queue, "err", err)
+			logger.Error(ctx, "MQ 消费启动失败", zap.String("queue", queue), zap.Error(err))
 			return
 		}
-		logger.Info("MQ 消费者启动", "queue", queue)
+		logger.Info(ctx, "MQ 消费者启动", zap.String("queue", queue))
 
 		for d := range deliveries {
-			c.handleMessage(ch, queue, d, h)
+			c.handleMessage(ctx, ch, queue, d, h)
 		}
 		// deliveries 关闭:连接断开,退出由 Run 重启
-		logger.Warn("MQ 消费通道关闭", "queue", queue)
+		logger.Warn(ctx, "MQ 消费通道关闭", zap.String("queue", queue))
 		return
 	}
 }
 
-func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, h Handler) {
+// handleMessage 单条消息的分发与应答;ctx 来自消费者 goroutine(Run 的生命周期)。
+func (c *Client) handleMessage(ctx context.Context, ch *amqp.Channel, queue string, d amqp.Delivery, h Handler) {
 	start := time.Now()
 	err := safeHandle(h, d.Body)
 	if err == nil {
@@ -299,7 +302,8 @@ func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, 
 		return
 	}
 	if errors.Is(err, ErrAck) {
-		logger.Info("MQ 消息业务终态,确认", "queue", queue, "msg_id", d.MessageId)
+		logger.Info(ctx, "MQ 消息业务终态,确认",
+			zap.String("queue", queue), zap.String("msg_id", d.MessageId))
 		_ = d.Ack(false)
 		return
 	}
@@ -307,14 +311,15 @@ func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, 
 	// 基础设施类失败:重试
 	retry := retryCount(d.Headers) + 1
 	if retry > c.maxRetry {
-		logger.Error("MQ 消费重试超限,转入停车队列", "queue", queue,
-			"retry", retry, "err", err, "body", string(d.Body))
+		logger.Error(ctx, "MQ 消费重试超限,转入停车队列", zap.String("queue", queue),
+			zap.String("msg_id", d.MessageId), zap.Int("retry_count", retry),
+			zap.Error(err), zap.String("body", string(d.Body)))
 		parkCtx, cancel := context.WithTimeout(context.Background(), c.opTimeout)
 		if perr := c.PublishRaw(parkCtx, QueueParking, d.Body, amqp.Table{
 			"x-origin-queue": queue,
 			"x-last-error":   err.Error(),
 		}); perr != nil {
-			logger.Error("转入停车队列失败,消息将重新入队", "err", perr)
+			logger.Error(ctx, "转入停车队列失败,消息将重新入队", zap.Error(perr))
 			_ = d.Nack(false, true) // 宁可重复也不能丢
 			cancel()
 			return
@@ -324,12 +329,13 @@ func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, 
 		return
 	}
 
-	logger.Warn("MQ 消费失败,延迟重试", "queue", queue, "retry", retry,
-		"cost_ms", time.Since(start).Milliseconds(), "err", err)
+	logger.Warn(ctx, "MQ 消费失败,延迟重试", zap.String("queue", queue),
+		zap.String("msg_id", d.MessageId), zap.Int("retry_count", retry),
+		zap.Int64("latency_ms", time.Since(start).Milliseconds()), zap.Error(err))
 	// 重发一条带新计数的新消息,确认旧消息(避免 requeue 死循环且保证不丢)
 	pubCtx, cancel := context.WithTimeout(context.Background(), c.opTimeout)
 	if perr := c.PublishRaw(pubCtx, queue, d.Body, amqp.Table{"x-retry": int32(retry)}); perr != nil {
-		logger.Error("重发失败,消息将重新入队", "err", perr)
+		logger.Error(ctx, "重发失败,消息将重新入队", zap.Error(perr))
 		_ = d.Nack(false, true)
 		cancel()
 		return

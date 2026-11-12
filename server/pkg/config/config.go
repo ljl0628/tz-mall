@@ -19,6 +19,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 // 环境常量。
@@ -197,12 +198,14 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// MustLoad 加载配置,失败时打印错误并退出(启动期唯一允许 Fatal 的地方之一)。
+// MustLoad 加载配置,失败时 Fatal 退出(启动期唯一允许 Fatal 的地方之一)。
+// 此时 logger 尚未初始化(logger.Init 需要 Config),临时建 production logger
+// 输出 JSON 错误(带堆栈)到 stderr,退出码 1。
 func MustLoad() *Config {
 	cfg, err := Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "配置加载失败: %v\n", err)
-		os.Exit(1)
+		l, _ := zap.NewProduction()
+		l.Fatal("配置加载失败", zap.Error(err))
 	}
 	return cfg
 }

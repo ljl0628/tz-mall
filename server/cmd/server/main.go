@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"fawn-mall/internal/handler"
 	"fawn-mall/internal/model"
@@ -27,30 +28,37 @@ import (
 func main() {
 	// 1. 配置:viper 加载(环境变量 > config.{env}.yaml > config.yaml > 默认值),启动即强校验
 	cfg := config.MustLoad()
-	logger.Init(cfg.Log.Level)
-	logger.Info("配置加载完成(密码已脱敏)", "effective", cfg.MaskedSummary())
+	logger.Init(logger.Options{
+		Service: "fawn-mall", Env: cfg.Env,
+		Level: cfg.Log.Level, Format: cfg.Log.Format, Dir: cfg.Log.Dir,
+		MaxSizeMB: cfg.Log.MaxSizeMB, MaxAgeDays: cfg.Log.MaxAgeDays,
+		MaxBackups: cfg.Log.MaxBackups, Compress: cfg.Log.Compress,
+	})
+	// 日志级别热加载:配置文件变更仅即时作用于 log.level,其余配置重启生效
+	config.OnLogLevelChange(logger.SetLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	logger.Info(ctx, "配置加载完成(密码已脱敏)", zap.String("effective", cfg.MaskedSummary()))
 
 	// 2. MySQL:连接 + AutoMigrate + 种子数据
 	db, err := repository.NewDB(cfg)
 	if err != nil {
-		logger.Error("MySQL 初始化失败", "err", err)
+		logger.Error(ctx, "MySQL 初始化失败", zap.Error(err))
 		os.Exit(1)
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
 		&model.Order{}, &model.OrderItem{},
 	); err != nil {
-		logger.Error("AutoMigrate 失败", "err", err)
+		logger.Error(ctx, "AutoMigrate 失败", zap.Error(err))
 		os.Exit(1)
 	}
-	logger.Info("MySQL 已连接,表结构已同步")
+	logger.Info(ctx, "MySQL 已连接,表结构已同步")
 
 	userRepo := repository.NewUserRepo(db)
 	if err := seed.Seed(db, userRepo); err != nil {
-		logger.Error("种子数据写入失败", "err", err)
+		logger.Error(ctx, "种子数据写入失败", zap.Error(err))
 		os.Exit(1)
 	}
 
@@ -59,10 +67,10 @@ func main() {
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
 	})
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		logger.Error("Redis 连接失败", "err", err)
+		logger.Error(ctx, "Redis 连接失败", zap.Error(err))
 		os.Exit(1)
 	}
-	logger.Info("Redis 已连接", "addr", cfg.Redis.Addr)
+	logger.Info(ctx, "Redis 已连接", zap.String("addr", cfg.Redis.Addr))
 
 	// 4. 仓储与服务组装
 	categoryRepo := repository.NewCategoryRepo(db)
@@ -111,36 +119,37 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 	go func() {
-		logger.Info("HTTP 服务启动", "addr", srv.Addr)
+		logger.Info(ctx, "HTTP 服务启动", zap.String("addr", srv.Addr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("HTTP 服务异常退出", "err", err)
+			logger.Error(ctx, "HTTP 服务异常退出", zap.Error(err))
 			stop()
 		}
 	}()
 
 	// 8. 优雅关停(预算来自 server.shutdown_timeout:HTTP → MQ → Redis → MySQL 依次关闭)
 	<-ctx.Done()
-	logger.Info("收到退出信号,开始优雅关停")
+	logger.Info(ctx, "收到退出信号,开始优雅关停")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP 关停异常", "err", err)
+		logger.Error(ctx, "HTTP 关停异常", zap.Error(err))
 	}
 	mqClient.Close()
 	if err := rdb.Close(); err != nil {
-		logger.Warn("Redis 关闭异常", "err", err)
+		logger.Warn(ctx, "Redis 关闭异常", zap.Error(err))
 	}
 	if sqlDB, err := db.DB(); err == nil {
 		_ = sqlDB.Close()
 	}
-	logger.Info("已退出")
+	logger.Sync()
+	logger.Info(context.Background(), "shutdown: 进程已优雅退出")
 }
 
 // syncStockToRedis 启动时把 MySQL 库存灌入 Redis(仅当 key 不存在)。
 func syncStockToRedis(ctx context.Context, productRepo *repository.ProductRepo, stockRepo *repository.CacheStock) {
 	skus, err := productRepo.AllSKUs()
 	if err != nil {
-		logger.Error("读取 SKU 失败,跳过库存同步", "err", err)
+		logger.Error(ctx, "读取 SKU 失败,跳过库存同步", zap.Error(err))
 		return
 	}
 	items := make([]repository.StockItem, 0, len(skus))
@@ -148,8 +157,8 @@ func syncStockToRedis(ctx context.Context, productRepo *repository.ProductRepo, 
 		items = append(items, repository.StockItem{ProductID: sk.ProductID, Size: sk.Size, Quantity: sk.Stock})
 	}
 	if err := stockRepo.SyncFromMySQL(ctx, items); err != nil {
-		logger.Error("库存同步到 Redis 失败", "err", err)
+		logger.Error(ctx, "库存同步到 Redis 失败", zap.Error(err))
 		return
 	}
-	logger.Info("库存已同步到 Redis(SETNX 语义)", "skus", len(items))
+	logger.Info(ctx, "库存已同步到 Redis(SETNX 语义)", zap.Int("skus", len(items)))
 }

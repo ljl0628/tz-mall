@@ -2,7 +2,10 @@
 package seed
 
 import (
+	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/repository"
@@ -153,7 +156,7 @@ func Seed(db *gorm.DB, users *repository.UserRepo) error {
 			return fmt.Errorf("写入分类 %s: %w", c.Name, err)
 		}
 		catID[nc.Name] = nc.ID
-		logger.Info("种子:新增分类", "name", nc.Name, "id", nc.ID)
+		logger.Info(context.Background(), "种子:新增分类", zap.String("name", nc.Name), zap.Uint64("id", nc.ID))
 	}
 
 	// 2. 商品 + SKU(商品表为空时全量写入)
@@ -182,7 +185,8 @@ func Seed(db *gorm.DB, users *repository.UserRepo) error {
 					return fmt.Errorf("写入 SKU %s/%s: %w", sp.Name, sk.Size, err)
 				}
 			}
-			logger.Info("种子:新增商品", "name", sp.Name, "id", p.ID, "skus", len(sp.Sizes))
+			logger.Info(context.Background(), "种子:新增商品",
+				zap.String("name", sp.Name), zap.Uint64("id", p.ID), zap.Int("skus", len(sp.Sizes)))
 		}
 	}
 
@@ -197,7 +201,7 @@ func Seed(db *gorm.DB, users *repository.UserRepo) error {
 		}); err != nil {
 			return err
 		}
-		logger.Info("种子:新增管理员账号", "username", AdminUsername)
+		logger.Info(context.Background(), "种子:新增管理员账号", zap.String("username", AdminUsername))
 	}
 	if n, err := users.CountByRole(model.RoleUser); err == nil && n == 0 {
 		hash, herr := password.Hash(DemoPassword)
@@ -209,7 +213,7 @@ func Seed(db *gorm.DB, users *repository.UserRepo) error {
 		}); err != nil {
 			return err
 		}
-		logger.Info("种子:新增演示用户账号", "username", DemoUsername)
+		logger.Info(context.Background(), "种子:新增演示用户账号", zap.String("username", DemoUsername))
 	}
 	return nil
 }

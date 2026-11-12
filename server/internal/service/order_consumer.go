@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"go.uber.org/zap"
+
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/mq"
 	"fawn-mall/internal/repository"
@@ -27,13 +29,14 @@ func newConsumeCtx() (context.Context, context.CancelFunc) {
 func (s *OrderService) HandleOrderCreate(body []byte) error {
 	var msg mq.OrderCreateMsg
 	if err := json.Unmarshal(body, &msg); err != nil {
-		logger.Error("order.create 消息解析失败,业务终态确认", "err", err, "body", string(body))
+		logger.Error(context.Background(), "order.create 消息解析失败,业务终态确认",
+			zap.Error(err), zap.String("body", string(body)))
 		return mq.ErrAck
 	}
 
 	// 幂等:重试消息可能重复投递
 	if exist, err := s.orders.GetByOrderNo(msg.OrderNo, false); err == nil && exist != nil {
-		logger.Info("订单已存在,跳过重复消费", "order_no", msg.OrderNo)
+		logger.Info(context.Background(), "订单已存在,跳过重复消费", zap.String("order_no", msg.OrderNo))
 		return nil
 	}
 
@@ -67,8 +70,9 @@ func (s *OrderService) HandleOrderCreate(body []byte) error {
 		return err // 基础设施错误 → MQ 重试
 	}
 
-	logger.Info("MQ 消费:订单已落库并扣减 MySQL 库存",
-		"order_no", msg.OrderNo, "user_id", msg.UserID, "amount", msg.TotalAmount, "items", len(items))
+	logger.Info(context.Background(), "MQ 消费:订单已落库并扣减 MySQL 库存",
+		zap.String("order_no", msg.OrderNo), zap.Uint64("user_id", msg.UserID),
+		zap.Int64("amount", msg.TotalAmount), zap.Int("items", len(items)))
 
 	// 投递延迟取消消息:进入 TTL 延迟队列,15 分钟后死信到取消队列
 	ctx, cancel := newConsumeCtx()
@@ -80,7 +84,8 @@ func (s *OrderService) HandleOrderCreate(body []byte) error {
 	}); err != nil {
 		// 延迟消息发布失败不阻断订单(订单已有效);极端情况下超时取消缺失,
 		// 用户仍可主动取消。记录错误日志供人工补偿。
-		logger.Error("延迟取消消息投递失败,请人工核对", "order_no", msg.OrderNo, "err", err)
+		logger.Error(ctx, "延迟取消消息投递失败,请人工核对",
+			zap.String("order_no", msg.OrderNo), zap.Error(err))
 	}
 	return nil
 }
@@ -95,7 +100,8 @@ func (s *OrderService) saveInsufficientOrder(order *model.Order, items []model.O
 	order.CancelTime = &now
 	order.CancelReason = CancelReasonStock
 	if err := s.orders.SaveCanceledOrder(order, items); err != nil {
-		logger.Error("保存库存不足取消订单失败", "order_no", order.OrderNo, "err", err)
+		logger.Error(ctx, "保存库存不足取消订单失败",
+			zap.String("order_no", order.OrderNo), zap.Error(err))
 	}
 	stockItems := make([]repository.StockItem, 0, len(items))
 	for _, it := range items {
@@ -104,10 +110,11 @@ func (s *OrderService) saveInsufficientOrder(order *model.Order, items []model.O
 		})
 	}
 	if err := s.stock.RefundBatch(ctx, stockItems); err != nil {
-		logger.Error("库存不足回补 Redis 失败,请人工核对", "order_no", order.OrderNo, "err", err)
+		logger.Error(ctx, "库存不足回补 Redis 失败,请人工核对",
+			zap.String("order_no", order.OrderNo), zap.Error(err))
 	}
-	logger.Warn("MQ 消费:MySQL 库存不足,订单自动取消并回补 Redis",
-		"order_no", order.OrderNo, "reason", why)
+	logger.Warn(ctx, "MQ 消费:MySQL 库存不足,订单自动取消并回补 Redis",
+		zap.String("order_no", order.OrderNo), zap.String("reason", why))
 }
 
 // HandleOrderCancel 消费 order.cancel 队列(延迟队列 TTL 到期死信而来):
@@ -115,7 +122,8 @@ func (s *OrderService) saveInsufficientOrder(order *model.Order, items []model.O
 func (s *OrderService) HandleOrderCancel(body []byte) error {
 	var msg mq.OrderCancelMsg
 	if err := json.Unmarshal(body, &msg); err != nil {
-		logger.Error("order.cancel 消息解析失败,业务终态确认", "err", err, "body", string(body))
+		logger.Error(context.Background(), "order.cancel 消息解析失败,业务终态确认",
+			zap.Error(err), zap.String("body", string(body)))
 		return mq.ErrAck
 	}
 	ctx, cancel := newConsumeCtx()
@@ -126,12 +134,12 @@ func (s *OrderService) HandleOrderCancel(body []byte) error {
 		return err // 基础设施错误 → 重试
 	}
 	if order == nil {
-		logger.Info("超时取消:订单不存在(下单未落库),确认", "order_no", msg.OrderNo)
+		logger.Info(ctx, "超时取消:订单不存在(下单未落库),确认", zap.String("order_no", msg.OrderNo))
 		return mq.ErrAck
 	}
 	if order.Status != model.OrderStatusPendingPayment {
-		logger.Info("超时取消:订单已非待支付,确认",
-			"order_no", msg.OrderNo, "status", order.Status)
+		logger.Info(ctx, "超时取消:订单已非待支付,确认",
+			zap.String("order_no", msg.OrderNo), zap.String("status", order.Status))
 		return mq.ErrAck
 	}
 
@@ -140,7 +148,7 @@ func (s *OrderService) HandleOrderCancel(body []byte) error {
 		return err
 	}
 	if !ok {
-		logger.Info("超时取消:订单状态已变更(并发支付),确认", "order_no", msg.OrderNo)
+		logger.Info(ctx, "超时取消:订单状态已变更(并发支付),确认", zap.String("order_no", msg.OrderNo))
 	}
 	return nil
 }
