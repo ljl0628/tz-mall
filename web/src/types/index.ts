@@ -242,6 +242,13 @@ export interface StatementPage {
   page_size: number
 }
 
+/** 手动日结结果:实际重算的日期区间(列表展示的是全部历史台账,与单次天数无关)。 */
+export interface StatementRunResult {
+  done_days: number
+  from: string
+  to: string
+}
+
 /** 收货地址簿条目。 */
 export interface Address {
   id: number

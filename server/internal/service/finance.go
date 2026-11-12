@@ -418,30 +418,42 @@ func (s *FinanceService) RunDailyStatement(ctx context.Context, date string) err
 	return nil
 }
 
-// RunStatements 手动触发日结:单日或区间回填,返回完成天数。
-func (s *FinanceService) RunStatements(ctx context.Context, req StatementRunReq) (int, error) {
+// StatementRunResult 手动日结结果:实际重算的日期区间与完成天数。
+// 区间随结果返回,前端据此提示「重算的是哪几天」——列表展示的是全部历史台账,
+// 与单次执行的天数无关,不返回区间会造成「选 2 天却看到多天」的误解。
+type StatementRunResult struct {
+	DoneDays int    `json:"done_days"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+}
+
+// RunStatements 手动触发日结:单日或区间回填,返回实际重算的日期区间。
+func (s *FinanceService) RunStatements(ctx context.Context, req StatementRunReq) (StatementRunResult, error) {
 	if req.Date == "" {
 		req.Date = cstDate(time.Now().AddDate(0, 0, -1))
 	}
 	base, err := time.ParseInLocation("2006-01-02", req.Date, cstLoc)
 	if err != nil {
-		return 0, resp.NewBiz(resp.CodeParamError, "日期格式应为 YYYY-MM-DD")
+		return StatementRunResult{}, resp.NewBiz(resp.CodeParamError, "日期格式应为 YYYY-MM-DD")
 	}
 	if req.Date > TodayCST() { // ISO 日期字符串可直接字典序比较
-		return 0, resp.NewBiz(resp.CodeParamError, "不能对未来日期日结")
+		return StatementRunResult{}, resp.NewBiz(resp.CodeParamError, "不能对未来日期日结")
 	}
 	days := req.Days
 	if days <= 0 {
 		days = 1
 	}
-	done := 0
+	result := StatementRunResult{
+		From: cstDate(base.AddDate(0, 0, -(days - 1))),
+		To:   cstDate(base),
+	}
 	for i := days - 1; i >= 0; i-- {
 		if err := s.RunDailyStatement(ctx, cstDate(base.AddDate(0, 0, -i))); err != nil {
-			return done, err
+			return result, err
 		}
-		done++
+		result.DoneDays++
 	}
-	return done, nil
+	return result, nil
 }
 
 // ListStatements 日结账单分页(对账管理页展示)。

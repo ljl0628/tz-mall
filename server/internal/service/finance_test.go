@@ -248,6 +248,46 @@ func TestRefundReject(t *testing.T) {
 	}
 }
 
+// TestRunStatementsRange 手动日结返回实际重算区间:
+// days 只控制重算窗口大小,不决定台账列表条数——列表是全部历史日结
+// (曾因此被误解为「选 2 天却返回 4 天」,区间随结果返回以便前端明示)。
+func TestRunStatementsRange(t *testing.T) {
+	finSvc, _, _, _ := setupFinanceSvc(t)
+	ctx := context.Background()
+	db, _ := testutil.Setup(t)
+	today := TodayCST()
+	yesterday := cstDate(time.Now().In(cstLoc).AddDate(0, 0, -1))
+	t.Cleanup(func() {
+		db.Where("stat_date IN ?", []string{today, yesterday}).Delete(&model.DailyStatement{})
+	})
+
+	// date=今天、days=2 → 恰好重算 [昨天, 今天],区间随结果返回
+	res, err := finSvc.RunStatements(ctx, StatementRunReq{Date: today, Days: 2})
+	if err != nil {
+		t.Fatalf("RunStatements 失败: %v", err)
+	}
+	if res.DoneDays != 2 || res.From != yesterday || res.To != today {
+		t.Fatalf("重算区间异常: %+v(期望 from=%s to=%s done=2)", res, yesterday, today)
+	}
+	var n int64
+	db.Model(&model.DailyStatement{}).Where("stat_date IN ?", []string{today, yesterday}).Count(&n)
+	if n != 2 {
+		t.Errorf("应恰好落 2 行日结,实际 %d", n)
+	}
+
+	// days 缺省按 1 天,from=to=所选日期
+	res, err = finSvc.RunStatements(ctx, StatementRunReq{Date: today})
+	if err != nil || res.DoneDays != 1 || res.From != today || res.To != today {
+		t.Fatalf("缺省 days 应按 1 天: %+v err=%v", res, err)
+	}
+
+	// 未来日期拒绝
+	future := cstDate(time.Now().In(cstLoc).AddDate(0, 0, 1))
+	if _, err := finSvc.RunStatements(ctx, StatementRunReq{Date: future}); err == nil {
+		t.Fatal("未来日期应拒绝日结")
+	}
+}
+
 // TestReconcileAndStatement 一键对账 + 日结 + 看板全链路:
 // 支付/退款后平账;人为删除进账流水 → 不平并给出差额与明细;
 // 日结幂等聚合;看板今日指标与趋势今日点位取实时流水。

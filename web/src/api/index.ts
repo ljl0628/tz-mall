@@ -17,6 +17,7 @@ import type {
   RefundOrder,
   RefundPage,
   StatementPage,
+  StatementRunResult,
   TrendPoint,
   User,
   UserPage,
@@ -203,9 +204,9 @@ export const financeApi = {
     })
     return http.get<StatementPage>(`/admin/finance/statements?${p.toString()}`)
   },
-  /** 手动日结:date 缺省昨天;days>1 回填最近 N 天 */
+  /** 手动日结:date 缺省昨天;days>1 回填最近 N 天,返回实际重算区间 */
   runStatements: (body: { date?: string; days?: number }) =>
-    http.post<{ done_days: number }>('/admin/finance/statements/run', body),
+    http.post<StatementRunResult>('/admin/finance/statements/run', body),
 }
 
 // ---- 用户侧退款申请 ----

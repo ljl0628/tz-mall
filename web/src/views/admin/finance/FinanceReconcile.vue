@@ -42,7 +42,7 @@ async function runStatements() {
       date: runForm.value.date || undefined,
       days,
     })
-    toast(`日结完成,已生成 ${r.done_days} 天账单`)
+    toast(`日结完成:已重算 ${r.from} ~ ${r.to} 共 ${r.done_days} 天`)
     stmtPage.value = 1
     await loadStatements()
   } finally {
@@ -151,11 +151,16 @@ function sideSummary(s: ReconcileSide): string {
             placeholder="结算日期(默认昨天)"
             style="width: 190px"
           />
-          <el-input-number v-model="runForm.days" :min="1" :max="366" style="width: 110px" />
+          <span class="run-label">向前重算</span>
+          <el-input-number v-model="runForm.days" :min="1" :max="366" style="width: 100px" />
+          <span class="run-label">天</span>
           <el-button :loading="running" @click="runStatements">手动日结</el-button>
         </div>
       </div>
-      <p class="tip">每天 02:00(北京时间)定时结算前一天;days 设为 N 可回填最近 N 天(幂等,重复执行覆盖更新)。</p>
+      <p class="tip">
+        每天 02:00(北京时间)定时结算前一天。「手动日结」只重算所选日期起向前 N 天(幂等,重复执行覆盖更新);
+        下方列表是<strong>全部历史日结台账</strong>(共 {{ stmtTotal }} 天),不会因单次执行而减少。
+      </p>
 
       <el-table :data="stmts" v-loading="stmtLoading" stripe class="table">
         <el-table-column label="日期" prop="stat_date" width="130" />
@@ -224,6 +229,11 @@ function sideSummary(s: ReconcileSide): string {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.run-label {
+  font-size: 13px;
+  color: var(--fawn-text-sub);
 }
 
 .tip {

@@ -152,5 +152,5 @@ func (h *FinanceHandler) RunStatements(c *gin.Context) {
 		resp.Fail(c, err)
 		return
 	}
-	resp.OK(c, gin.H{"done_days": n})
+	resp.OK(c, n)
 }
