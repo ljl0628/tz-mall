@@ -2,6 +2,10 @@
 # ---------- 构建阶段:编译静态二进制 ----------
 FROM golang:1.22-alpine AS builder
 
+# 默认国内代理加速依赖下载;海外构建可 --build-arg GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /app
 
 # 先拷贝依赖清单,利用 Docker 层缓存加速重复构建
