@@ -39,6 +39,9 @@ const (
 	CodeSelfOp             = 60015 // 不能对自己执行该操作
 	CodeAddressNotFound    = 60016 // 收货地址不存在
 	CodeAddressLimit       = 60017 // 收货地址数量达到上限
+	CodeRefundConflict     = 60018 // 退款重复操作或订单状态异常
+	CodeRefundNotFound     = 60019 // 退款售后单不存在
+	CodeRefundApplyDup     = 60020 // 已存在进行中的退款申请
 )
 
 // Body 统一响应体。

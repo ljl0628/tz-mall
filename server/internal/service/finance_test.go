@@ -1,0 +1,248 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"fawn-mall/internal/model"
+	"fawn-mall/internal/repository"
+	"fawn-mall/internal/testutil"
+	"fawn-mall/pkg/resp"
+)
+
+// setupFinanceSvc 组装财务服务(真实 MySQL/Redis,禁止 mock)。
+func setupFinanceSvc(t *testing.T) (*FinanceService, *OrderService, *repository.OrderRepo, *repository.CacheStock) {
+	t.Helper()
+	orderSvc, orderRepo, stock := setupOrderSvc(t)
+	db, _ := testutil.Setup(t)
+	return NewFinanceService(repository.NewFinanceRepo(db), orderRepo, stock), orderSvc, orderRepo, stock
+}
+
+// createPaidOrder 造一笔已支付订单:商品(库存 5)→ Redis 预扣 1 → MySQL 扣减落库 → 模拟支付(写入进账流水)。
+// 返回支付后的订单与商品 ID,并注册全程清理。
+func createPaidOrder(t *testing.T, orderSvc *OrderService, orderRepo *repository.OrderRepo,
+	stock *repository.CacheStock, uid uint64, name string) (*model.Order, uint64) {
+	t.Helper()
+	ctx := context.Background()
+	db, rdb := testutil.Setup(t)
+
+	p := testutil.NewProduct(t, db, name, []model.SKU{{Size: "120", Stock: 5}})
+	t.Cleanup(func() { rdb.Del(ctx, repository.StockKey(p.ID, "120")) })
+	if err := stock.SyncFromMySQL(ctx, []repository.StockItem{
+		{ProductID: p.ID, Size: "120", Quantity: 5},
+	}); err != nil {
+		t.Fatalf("同步库存失败: %v", err)
+	}
+	if err := stock.DeductBatch(ctx, []repository.StockItem{
+		{ProductID: p.ID, Size: "120", Quantity: 1},
+	}, func(repository.StockItem) string { return name }); err != nil {
+		t.Fatalf("Redis 预扣失败: %v", err)
+	}
+
+	order := &model.Order{
+		OrderNo: GenOrderNo(), UserID: uid, Status: model.OrderStatusPendingPayment,
+		TotalAmount: 9900, PayAmount: 9900,
+		Receiver: "退款测试妈妈", Phone: "13800138000", Address: "广东省深圳市南山区测试路 5 号",
+	}
+	if err := orderRepo.CreateOrderWithDeduct(order, []model.OrderItem{
+		{ProductID: p.ID, ProductName: name, Size: "120", Price: 9900, Quantity: 1},
+	}); err != nil {
+		t.Fatalf("订单落库失败: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.PayFlow{})
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.RefundOrder{})
+		db.Where("order_id = ?", order.ID).Delete(&model.OrderItem{})
+		db.Delete(&model.Order{}, order.ID)
+	})
+
+	paid, err := orderSvc.Pay(ctx, uid, order.OrderNo)
+	if err != nil {
+		t.Fatalf("模拟支付失败: %v", err)
+	}
+	return paid, p.ID
+}
+
+// assertBizCode 断言错误为指定业务码。
+func assertBizCode(t *testing.T, err error, want int) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("期望业务错误码 %d,得到 nil", want)
+	}
+	var be *resp.BizError
+	if !errors.As(err, &be) || be.Code != want {
+		t.Fatalf("期望业务错误码 %d,得到: %v", want, err)
+	}
+}
+
+// countFlows 统计订单指定方向的流水条数。
+func countFlows(t *testing.T, orderNo string, direction int8) int64 {
+	t.Helper()
+	db, _ := testutil.Setup(t)
+	var n int64
+	if err := db.Model(&model.PayFlow{}).
+		Where("order_no = ? AND direction = ?", orderNo, direction).
+		Count(&n).Error; err != nil {
+		t.Fatalf("统计流水失败: %v", err)
+	}
+	return n
+}
+
+// TestAdminRefund_Concurrency 防并发退款(财务中心核心验收):
+// 同一已支付订单 20 个并发退款,恰好 1 个成功、19 个「重复操作或状态异常」;
+// 出账流水与售后单各恰好 1 条,MySQL 与 Redis 库存恰好回补一次,绝不超额退款。
+func TestAdminRefund_Concurrency(t *testing.T) {
+	finSvc, orderSvc, orderRepo, stock := setupFinanceSvc(t)
+	ctx := context.Background()
+	db, _ := testutil.Setup(t)
+
+	order, pid := createPaidOrder(t, orderSvc, orderRepo, stock, 7, "并发退款测试商品")
+	orderNo := order.OrderNo
+
+	var okCount, conflict atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := finSvc.AdminRefund(ctx, 99, orderNo, "并发退款测试")
+			if err == nil {
+				okCount.Add(1)
+				return
+			}
+			var be *resp.BizError
+			if errors.As(err, &be) && be.Code == resp.CodeRefundConflict {
+				conflict.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if okCount.Load() != 1 || conflict.Load() != 19 {
+		t.Fatalf("并发退款:成功 %d 次、拒绝 %d 次,期望 1/19", okCount.Load(), conflict.Load())
+	}
+
+	after, _ := orderRepo.GetByOrderNo(orderNo, false)
+	if after.Status != model.OrderStatusRefunded {
+		t.Errorf("订单终态 = %s,期望 refunded", after.Status)
+	}
+	if after.RefundTime == nil {
+		t.Errorf("退款时间未落库")
+	}
+	if n := countFlows(t, orderNo, model.FlowDirectionIn); n != 1 {
+		t.Errorf("进账流水 = %d 条,期望 1(支付流水不受退款影响)", n)
+	}
+	if n := countFlows(t, orderNo, model.FlowDirectionOut); n != 1 {
+		t.Errorf("出账流水 = %d 条,期望恰好 1(绝不超额退款)", n)
+	}
+	var refunds int64
+	db.Model(&model.RefundOrder{}).Where("order_no = ?", orderNo).Count(&refunds)
+	if refunds != 1 {
+		t.Errorf("售后单 = %d 条,期望 1", refunds)
+	}
+	var sku model.SKU
+	db.Where("product_id = ? AND size = ?", pid, "120").First(&sku)
+	if sku.Stock != 5 {
+		t.Errorf("MySQL 回补后库存 = %d,期望恰好回补一次到 5", sku.Stock)
+	}
+	if v, _ := stock.Get(ctx, pid, "120"); v != 5 {
+		t.Errorf("Redis 回补后库存 = %d,期望 5", v)
+	}
+}
+
+// TestRefundApplyLifecycle 用户申请 → 管理员审核通过全链路;
+// 重复申请、冒用申请、重复处理、已退款再退均被正确拒绝。
+func TestRefundApplyLifecycle(t *testing.T) {
+	finSvc, orderSvc, orderRepo, stock := setupFinanceSvc(t)
+	ctx := context.Background()
+	db, _ := testutil.Setup(t)
+
+	order, pid := createPaidOrder(t, orderSvc, orderRepo, stock, 8, "退款申请测试商品")
+
+	// 用户提交申请
+	if err := finSvc.ApplyRefund(ctx, order.UserID, order.OrderNo, "尺码不合适,想换大两码"); err != nil {
+		t.Fatalf("提交退款申请失败: %v", err)
+	}
+	// 重复申请被拒
+	assertBizCode(t, finSvc.ApplyRefund(ctx, order.UserID, order.OrderNo, "再申请一次"), resp.CodeRefundApplyDup)
+	// 他人冒用被拒(订单不存在同提示)
+	assertBizCode(t, finSvc.ApplyRefund(ctx, order.UserID+1, order.OrderNo, "冒用申请"), resp.CodeOrderNotFound)
+
+	// 管理员审核通过
+	var row model.RefundOrder
+	if err := db.Where("order_no = ?", order.OrderNo).First(&row).Error; err != nil {
+		t.Fatalf("查询售后单失败: %v", err)
+	}
+	if err := finSvc.ProcessRefund(ctx, 99, row.RefundNo, true); err != nil {
+		t.Fatalf("审核通过失败: %v", err)
+	}
+
+	after, _ := orderRepo.GetByOrderNo(order.OrderNo, false)
+	if after.Status != model.OrderStatusRefunded {
+		t.Errorf("订单状态 = %s,期望 refunded", after.Status)
+	}
+	if n := countFlows(t, order.OrderNo, model.FlowDirectionOut); n != 1 {
+		t.Errorf("出账流水 = %d 条,期望 1", n)
+	}
+	var updated model.RefundOrder
+	db.First(&updated, row.ID)
+	if updated.Status != model.RefundStatusRefunded || updated.OperatorID != 99 || updated.ProcessedAt == nil {
+		t.Errorf("售后单终态异常: %+v", updated)
+	}
+	var sku model.SKU
+	db.Where("product_id = ? AND size = ?", pid, "120").First(&sku)
+	if sku.Stock != 5 {
+		t.Errorf("MySQL 库存 = %d,期望回补到 5", sku.Stock)
+	}
+	if v, _ := stock.Get(ctx, pid, "120"); v != 5 {
+		t.Errorf("Redis 库存 = %d,期望 5", v)
+	}
+
+	// 重复处理同一申请被拒
+	assertBizCode(t, finSvc.ProcessRefund(ctx, 99, row.RefundNo, true), resp.CodeRefundConflict)
+	// 已退款订单不能再申请
+	assertBizCode(t, finSvc.ApplyRefund(ctx, order.UserID, order.OrderNo, "再来一次"), resp.CodeOrderStatus)
+	// 已退款订单管理员直接退款也被拒
+	_, err := finSvc.AdminRefund(ctx, 99, order.OrderNo, "直接退款")
+	assertBizCode(t, err, resp.CodeRefundConflict)
+}
+
+// TestRefundReject 拒绝申请:订单保持已支付、无出账流水、库存不回补。
+func TestRefundReject(t *testing.T) {
+	finSvc, orderSvc, orderRepo, stock := setupFinanceSvc(t)
+	ctx := context.Background()
+	db, _ := testutil.Setup(t)
+
+	order, pid := createPaidOrder(t, orderSvc, orderRepo, stock, 9, "退款拒绝测试商品")
+	if err := finSvc.ApplyRefund(ctx, order.UserID, order.OrderNo, "七天无理由"); err != nil {
+		t.Fatalf("提交申请失败: %v", err)
+	}
+	var row model.RefundOrder
+	db.Where("order_no = ?", order.OrderNo).First(&row)
+	if err := finSvc.ProcessRefund(ctx, 99, row.RefundNo, false); err != nil {
+		t.Fatalf("拒绝失败: %v", err)
+	}
+
+	after, _ := orderRepo.GetByOrderNo(order.OrderNo, false)
+	if after.Status != model.OrderStatusPaid {
+		t.Errorf("拒绝后订单状态 = %s,期望仍为 paid", after.Status)
+	}
+	if n := countFlows(t, order.OrderNo, model.FlowDirectionOut); n != 0 {
+		t.Errorf("拒绝不应产生出账流水: %d 条", n)
+	}
+	var sku model.SKU
+	db.Where("product_id = ? AND size = ?", pid, "120").First(&sku)
+	if sku.Stock != 4 {
+		t.Errorf("拒绝后 MySQL 库存 = %d,期望保持扣减后的 4", sku.Stock)
+	}
+	if v, _ := stock.Get(ctx, pid, "120"); v != 4 {
+		t.Errorf("拒绝后 Redis 库存 = %d,期望 4", v)
+	}
+	// 拒绝后可再次申请(无进行中的售后单)
+	if err := finSvc.ApplyRefund(ctx, order.UserID, order.OrderNo, "重新申请"); err != nil {
+		t.Fatalf("拒绝后应允许重新申请: %v", err)
+	}
+}

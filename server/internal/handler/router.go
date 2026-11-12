@@ -21,6 +21,7 @@ type RouterDeps struct {
 	Order   *OrderHandler
 	Address *AddressHandler
 	Admin   *AdminHandler
+	Finance *FinanceHandler
 }
 
 // NewRouter 组装全部路由。
@@ -75,6 +76,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		user.POST("/orders/:orderNo/pay", d.Order.Pay)
 		user.POST("/orders/:orderNo/cancel", d.Order.Cancel)
 		user.POST("/orders/:orderNo/confirm", d.Order.Confirm)
+		user.POST("/orders/:orderNo/refund-apply", d.Order.RefundApply)
 
 		// 收货地址簿(仅本人数据)
 		user.GET("/user/addresses", d.Address.List)
@@ -107,6 +109,13 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		admin.PUT("/users/:id/status", d.Admin.SetUserStatus)
 		admin.PUT("/users/:id/role", d.Admin.SetUserRole)
 		admin.PUT("/users/:id/password", d.Admin.ResetUserPassword)
+
+		// 财务中心:退款售后(流水/看板/对账查询接口随模块补齐)
+		fin := admin.Group("/finance")
+		{
+			fin.POST("/refunds", d.Finance.AdminRefund)
+			fin.POST("/refunds/:refundNo/process", d.Finance.ProcessRefund)
+		}
 	}
 
 	return r

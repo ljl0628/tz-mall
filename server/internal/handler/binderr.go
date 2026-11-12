@@ -39,6 +39,8 @@ var fieldLabels = map[string]string{
 	"Quantity":    "数量",
 	"Sort":        "排序值",
 	"Role":        "角色",
+	"OrderNo":     "订单号",
+	"Reason":      "退款原因",
 }
 
 // bindErrMsg 将 gin 绑定/校验错误翻译为用户可读的中文提示。

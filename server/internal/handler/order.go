@@ -12,11 +12,14 @@ import (
 
 // OrderHandler 订单接口(均需登录)。
 type OrderHandler struct {
-	orders *service.OrderService
+	orders  *service.OrderService
+	finance *service.FinanceService
 }
 
 // NewOrderHandler 构造。
-func NewOrderHandler(o *service.OrderService) *OrderHandler { return &OrderHandler{orders: o} }
+func NewOrderHandler(o *service.OrderService, f *service.FinanceService) *OrderHandler {
+	return &OrderHandler{orders: o, finance: f}
+}
 
 // Place POST /orders —— 下单(Redis 预扣 + MQ 异步落库)
 func (h *OrderHandler) Place(c *gin.Context) {
@@ -84,4 +87,19 @@ func (h *OrderHandler) Confirm(c *gin.Context) {
 		return
 	}
 	resp.OK(c, out)
+}
+
+// RefundApply POST /orders/:orderNo/refund-apply —— 用户申请退款(待管理员审核)
+func (h *OrderHandler) RefundApply(c *gin.Context) {
+	var req service.RefundApplyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
+		return
+	}
+	if err := h.finance.ApplyRefund(c.Request.Context(), middleware.GetClaims(c).UserID,
+		c.Param("orderNo"), req.Reason); err != nil {
+		resp.Fail(c, err)
+		return
+	}
+	resp.OK(c, gin.H{"message": "退款申请已提交,请等待管理员处理"})
 }

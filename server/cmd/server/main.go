@@ -97,6 +97,7 @@ func main() {
 	cacheRepo := repository.NewCache(rdb)
 	stockRepo := repository.NewCacheStock(rdb)
 	blackRepo := repository.NewBlacklist(rdb)
+	financeRepo := repository.NewFinanceRepo(db)
 
 	jwtMgr := jwtx.New(cfg.JWT.Secret, cfg.JWT.Expire)
 	userState := repository.NewUserState(rdb, jwtMgr.ExpireDuration())
@@ -110,6 +111,7 @@ func main() {
 	orderSvc := service.NewOrderService(orderRepo, cartRepo, productRepo, stockRepo, mqClient, payTimeout)
 	addressSvc := service.NewAddressService(addressRepo)
 	adminSvc := service.NewAdminService(productRepo, categoryRepo, orderRepo, cacheRepo, stockRepo, userRepo, userState)
+	financeSvc := service.NewFinanceService(financeRepo, orderRepo, stockRepo)
 
 	// 对象存储(可选):配置了 qiniu.* 才启用商品图上传
 	var uploader storage.Uploader
@@ -139,9 +141,10 @@ func main() {
 		Auth:    handler.NewAuthHandler(authSvc),
 		Product: handler.NewProductHandler(productSvc),
 		Cart:    handler.NewCartHandler(cartSvc),
-		Order:   handler.NewOrderHandler(orderSvc),
+		Order:   handler.NewOrderHandler(orderSvc, financeSvc),
 		Address: handler.NewAddressHandler(addressSvc),
 		Admin:   handler.NewAdminHandler(adminSvc, uploader),
+		Finance: handler.NewFinanceHandler(financeSvc),
 	})
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
