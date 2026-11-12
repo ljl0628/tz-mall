@@ -304,11 +304,24 @@ func (r *FinanceRepo) UpsertStatement(st *model.DailyStatement) error {
 	}).Create(st).Error
 }
 
+// normalizeStatDate 统一 stat_date 读回格式为 YYYY-MM-DD。
+// GORM MySQL DSN 默认 parseTime=true,DATE 列经 database/sql 转字符串时
+// 会变成 RFC3339(如 2026-11-12T00:00:00Z),截取前 10 位还原,
+// 否则趋势图按日期建 map 会因 key 不匹配漏掉历史天。
+func normalizeStatDate(list []model.DailyStatement) {
+	for i := range list {
+		if len(list[i].StatDate) > 10 {
+			list[i].StatDate = list[i].StatDate[:10]
+		}
+	}
+}
+
 // ListStatements 日结账单区间查询[from, to](YYYY-MM-DD 含端点),日期倒序。
 func (r *FinanceRepo) ListStatements(from, to string) ([]model.DailyStatement, error) {
 	var list []model.DailyStatement
 	err := r.db.Where("stat_date >= ? AND stat_date <= ?", from, to).
 		Order("stat_date DESC").Find(&list).Error
+	normalizeStatDate(list)
 	return list, err
 }
 
@@ -327,6 +340,7 @@ func (r *FinanceRepo) ListStatementsPage(page, pageSize int) ([]model.DailyState
 	var list []model.DailyStatement
 	err := r.db.Order("stat_date DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	normalizeStatDate(list)
 	return list, total, err
 }
 

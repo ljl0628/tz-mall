@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/repository"
@@ -326,6 +327,23 @@ func TestReconcileAndStatement(t *testing.T) {
 	last := points[len(points)-1]
 	if last.PayAmount != order.PayAmount || last.RefundAmount != order.PayAmount || last.NetAmount != 0 {
 		t.Errorf("趋势今日点位异常: %+v", last)
+	}
+
+	// 回归:昨日日结必须出现在趋势倒数第二点。DATE 列读回 string 字段时
+	// 会变成 RFC3339(2026-11-12T00:00:00Z),曾导致按日期 map 匹配不上、历史天全为 0。
+	yesterday := cstDate(time.Now().In(cstLoc).AddDate(0, 0, -1))
+	db.Create(&model.DailyStatement{
+		StatDate: yesterday, PayAmount: 12300, RefundAmount: 2300,
+		NetAmount: 10000, PayCount: 2, RefundCount: 1,
+	})
+	t.Cleanup(func() { db.Where("stat_date = ?", yesterday).Delete(&model.DailyStatement{}) })
+	points, err = finSvc.Trend(ctx, 7)
+	if err != nil {
+		t.Fatalf("趋势(含昨日日结)失败: %v", err)
+	}
+	hist := points[len(points)-2]
+	if hist.Date != yesterday || hist.PayAmount != 12300 || hist.RefundAmount != 2300 || hist.NetAmount != 10000 {
+		t.Errorf("趋势昨日点位应读日结表: %+v(期望日期 %s 进 12300 出 2300 净 10000)", hist, yesterday)
 	}
 
 	// 人为删除进账流水 → 不平,差额 = 流水侧 - 订单侧 = -实付金额,并给出差异明细
