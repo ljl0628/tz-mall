@@ -75,6 +75,8 @@ func TestCancelIfUnpaid_TimeoutCancelAndRefund(t *testing.T) {
 		t.Fatalf("订单落库失败: %v", err)
 	}
 	t.Cleanup(func() {
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.PayFlow{})
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.RefundOrder{})
 		db.Where("order_id = ?", order.ID).Delete(&model.OrderItem{})
 		db.Delete(&model.Order{}, order.ID)
 	})
@@ -151,6 +153,8 @@ func TestPayAndCancelConcurrency(t *testing.T) {
 		t.Fatalf("订单落库失败: %v", err)
 	}
 	t.Cleanup(func() {
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.PayFlow{})
+		db.Where("order_no = ?", order.OrderNo).Delete(&model.RefundOrder{})
 		db.Where("order_id = ?", order.ID).Delete(&model.OrderItem{})
 		db.Delete(&model.Order{}, order.ID)
 	})

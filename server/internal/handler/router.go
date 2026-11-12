@@ -110,11 +110,18 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		admin.PUT("/users/:id/role", d.Admin.SetUserRole)
 		admin.PUT("/users/:id/password", d.Admin.ResetUserPassword)
 
-		// 财务中心:退款售后(流水/看板/对账查询接口随模块补齐)
+		// 财务中心:看板 / 流水 / 退款售后 / 对账
 		fin := admin.Group("/finance")
 		{
+			fin.GET("/dashboard", d.Finance.Dashboard)
+			fin.GET("/flows", d.Finance.Flows)
+			fin.GET("/trend", d.Finance.Trend)
+			fin.GET("/refunds", d.Finance.RefundList)
 			fin.POST("/refunds", d.Finance.AdminRefund)
 			fin.POST("/refunds/:refundNo/process", d.Finance.ProcessRefund)
+			fin.GET("/statements", d.Finance.Statements)
+			fin.POST("/statements/run", d.Finance.RunStatements)
+			fin.POST("/reconcile", d.Finance.Reconcile)
 		}
 	}
 

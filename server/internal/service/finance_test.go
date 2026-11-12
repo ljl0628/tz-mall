@@ -246,3 +246,102 @@ func TestRefundReject(t *testing.T) {
 		t.Fatalf("拒绝后应允许重新申请: %v", err)
 	}
 }
+
+// TestReconcileAndStatement 一键对账 + 日结 + 看板全链路:
+// 支付/退款后平账;人为删除进账流水 → 不平并给出差额与明细;
+// 日结幂等聚合;看板今日指标与趋势今日点位取实时流水。
+func TestReconcileAndStatement(t *testing.T) {
+	finSvc, orderSvc, orderRepo, stock := setupFinanceSvc(t)
+	ctx := context.Background()
+	db, _ := testutil.Setup(t)
+	today := TodayCST()
+	t.Cleanup(func() { db.Where("stat_date = ?", today).Delete(&model.DailyStatement{}) })
+
+	order, _ := createPaidOrder(t, orderSvc, orderRepo, stock, 10, "对账日结测试商品")
+
+	// 自愈:清掉历史孤儿流水/售后单(订单已被此前测试清理但账本残留),
+	// 保证对账断言的基数干净;对账逻辑本身不受影响。
+	db.Exec("DELETE FROM pay_flows WHERE order_no NOT IN (SELECT order_no FROM orders)")
+	db.Exec("DELETE FROM refund_orders WHERE order_no NOT IN (SELECT order_no FROM orders)")
+
+	// 支付后平账
+	r, err := finSvc.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("对账失败: %v", err)
+	}
+	if !r.Balanced {
+		t.Fatalf("支付后应平账: %+v", r)
+	}
+
+	// 退款后仍平账(进账侧不变,退款侧双口径一致)
+	if _, err := finSvc.AdminRefund(ctx, 99, order.OrderNo, "对账退款"); err != nil {
+		t.Fatalf("退款失败: %v", err)
+	}
+	r, err = finSvc.Reconcile(ctx)
+	if err != nil || !r.Balanced {
+		t.Fatalf("退款后应平账: balanced=%v err=%v", r.Balanced, err)
+	}
+	if r.RefundSide.OrderTotal != order.PayAmount || r.RefundSide.FlowTotal != order.PayAmount {
+		t.Errorf("退款侧口径异常: %+v", r.RefundSide)
+	}
+
+	// 日结(今日):进账/出账各一笔,净收入为 0;幂等重跑数值不变
+	if err := finSvc.RunDailyStatement(ctx, today); err != nil {
+		t.Fatalf("日结失败: %v", err)
+	}
+	if err := finSvc.RunDailyStatement(ctx, today); err != nil {
+		t.Fatalf("日结幂等重跑失败: %v", err)
+	}
+	var st model.DailyStatement
+	if err := db.Where("stat_date = ?", today).First(&st).Error; err != nil {
+		t.Fatalf("查询日结失败: %v", err)
+	}
+	if st.PayAmount != order.PayAmount || st.RefundAmount != order.PayAmount || st.NetAmount != 0 {
+		t.Errorf("日结金额异常: %+v(期望进/出各 %d,净 0)", st, order.PayAmount)
+	}
+	if st.PayCount != 1 || st.RefundCount != 1 {
+		t.Errorf("日结笔数异常: %+v", st)
+	}
+
+	// 看板:今日销售额/退款额等于实付金额,待处理申请为 0
+	dash, err := finSvc.Dashboard(ctx)
+	if err != nil {
+		t.Fatalf("看板失败: %v", err)
+	}
+	if dash.TodayPay != order.PayAmount || dash.TodayRefund != order.PayAmount {
+		t.Errorf("看板今日指标异常: %+v", dash)
+	}
+	if dash.PendingRefunds != 0 {
+		t.Errorf("待处理申请应清零: %+v", dash)
+	}
+
+	// 趋势:最后一个点位是今天,取实时流水
+	points, err := finSvc.Trend(ctx, 7)
+	if err != nil {
+		t.Fatalf("趋势失败: %v", err)
+	}
+	if len(points) != 7 || points[len(points)-1].Date != today {
+		t.Fatalf("趋势点位异常: %d 个,末日 %s", len(points), points[len(points)-1].Date)
+	}
+	last := points[len(points)-1]
+	if last.PayAmount != order.PayAmount || last.RefundAmount != order.PayAmount || last.NetAmount != 0 {
+		t.Errorf("趋势今日点位异常: %+v", last)
+	}
+
+	// 人为删除进账流水 → 不平,差额 = 流水侧 - 订单侧 = -实付金额,并给出差异明细
+	db.Where("order_no = ? AND direction = ?", order.OrderNo, model.FlowDirectionIn).
+		Delete(&model.PayFlow{})
+	r, err = finSvc.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("对账失败: %v", err)
+	}
+	if r.Balanced {
+		t.Fatal("流水缺失应判不平")
+	}
+	if r.PaySide.Diff != -order.PayAmount {
+		t.Errorf("进账差额 = %d,期望 %d", r.PaySide.Diff, -order.PayAmount)
+	}
+	if len(r.Mismatches) == 0 {
+		t.Error("不平时应给出差异明细")
+	}
+}

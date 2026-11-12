@@ -22,6 +22,7 @@ import (
 	"fawn-mall/internal/repository"
 	"fawn-mall/internal/seed"
 	"fawn-mall/internal/service"
+	"fawn-mall/internal/task"
 	"fawn-mall/pkg/config"
 	"fawn-mall/pkg/dbmigrate"
 	"fawn-mall/pkg/jwtx"
@@ -128,6 +129,9 @@ func main() {
 	mqClient.RegisterHandler(mq.QueueOrderCreate, orderSvc.HandleOrderCreate)
 	mqClient.RegisterHandler(mq.QueueOrderCancel, orderSvc.HandleOrderCancel)
 	go mqClient.Run(ctx)
+
+	// 5.1 财务日结定时任务:启动补跑昨日 + 每天 02:00(北京时间)聚合昨日流水
+	task.StartDailyStatement(ctx, financeSvc)
 
 	// 6. 启动时同步 MySQL 库存 → Redis(SETNX,不覆盖运行中差额)
 	syncStockToRedis(ctx, productRepo, stockRepo)

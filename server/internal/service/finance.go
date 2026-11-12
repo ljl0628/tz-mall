@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -169,4 +170,285 @@ func (s *FinanceService) restoreRedisStock(ctx context.Context, key string, item
 		logger.Error(ctx, "退款成功但 Redis 库存回补失败,请人工核对",
 			zap.String("key", key), zap.Error(rerr))
 	}
+}
+
+// ---------- 北京时间口径(财务"天"的边界,不依赖容器时区) ----------
+
+// cstLoc 业务时区:日结/看板/趋势的"天"固定按北京时间切分。
+var cstLoc = time.FixedZone("Asia/Shanghai", 8*3600)
+
+// TodayCST 今天(北京时间,YYYY-MM-DD)。
+func TodayCST() string { return time.Now().In(cstLoc).Format("2006-01-02") }
+
+// cstDate 时刻所在的北京时间日期串。
+func cstDate(t time.Time) string { return t.In(cstLoc).Format("2006-01-02") }
+
+// DayRange 北京时间某日的 [00:00, 次日 00:00) 绝对时刻区间。
+func DayRange(date string) (time.Time, time.Time, error) {
+	d, err := time.ParseInLocation("2006-01-02", date, cstLoc)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("日期格式应为 YYYY-MM-DD")
+	}
+	return d, d.Add(24 * time.Hour), nil
+}
+
+// ---------- 查询:流水 / 售后单 ----------
+
+// ListFlows 资金流水分页(支持日期范围、订单号、流水号、方向筛选)。
+func (s *FinanceService) ListFlows(ctx context.Context, q repository.FlowQuery) (*PageList, error) {
+	if q.Page <= 0 {
+		q.Page = 1
+	}
+	if q.PageSize <= 0 || q.PageSize > 50 {
+		q.PageSize = 10
+	}
+	if q.Direction != 0 && q.Direction != model.FlowDirectionIn && q.Direction != model.FlowDirectionOut {
+		return nil, resp.NewBiz(resp.CodeParamError, "流水方向参数非法")
+	}
+	list, total, err := s.finance.ListFlows(q)
+	if err != nil {
+		return nil, err
+	}
+	return &PageList{List: list, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
+}
+
+// ListRefunds 售后单分页。
+func (s *FinanceService) ListRefunds(ctx context.Context, status string, page, pageSize int) (*PageList, error) {
+	switch status {
+	case "", model.RefundStatusPending, model.RefundStatusRefunded, model.RefundStatusRejected:
+	default:
+		return nil, resp.NewBiz(resp.CodeParamError, "售后单状态非法")
+	}
+	list, total, err := s.finance.ListRefunds(status, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return &PageList{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+// ---------- 经营看板 / 趋势 ----------
+
+// DashboardResp 看板核心指标(金额单位:分)。
+type DashboardResp struct {
+	TodayPay       int64 `json:"today_pay"`       // 今日销售额
+	TodayRefund    int64 `json:"today_refund"`    // 今日退款额
+	MonthNet       int64 `json:"month_net"`       // 本月净收入 = 本月日结(截至昨日) + 今日实时
+	PendingRefunds int64 `json:"pending_refunds"` // 待处理退款申请数
+}
+
+// Dashboard 经营看板:历史读日结表,仅"今日"实时聚合流水表(小表+索引),
+// 不在订单表上做实时大聚合。
+func (s *FinanceService) Dashboard(ctx context.Context) (*DashboardResp, error) {
+	today := TodayCST()
+	start, end, err := DayRange(today)
+	if err != nil {
+		return nil, err
+	}
+	sum, err := s.finance.SumFlows(start, end)
+	if err != nil {
+		return nil, err
+	}
+	monthStart := time.Now().In(cstLoc).Format("2006-01") + "-01"
+	stmts, err := s.finance.ListStatements(monthStart, today)
+	if err != nil {
+		return nil, err
+	}
+	var monthNet int64
+	for _, st := range stmts {
+		if st.StatDate == today {
+			continue // 今日以实时口径计,避免与日结重复
+		}
+		monthNet += st.NetAmount
+	}
+	monthNet += sum.PayAmount - sum.RefundAmount
+	pending, err := s.finance.CountPendingRefunds()
+	if err != nil {
+		return nil, err
+	}
+	return &DashboardResp{
+		TodayPay:       sum.PayAmount,
+		TodayRefund:    sum.RefundAmount,
+		MonthNet:       monthNet,
+		PendingRefunds: pending,
+	}, nil
+}
+
+// TrendPoint 趋势图单日数据(金额单位:分)。
+type TrendPoint struct {
+	Date         string `json:"date"`
+	PayAmount    int64  `json:"pay_amount"`
+	RefundAmount int64  `json:"refund_amount"`
+	NetAmount    int64  `json:"net_amount"`
+}
+
+// Trend 近 N 天收入趋势(默认 7 天,上限 90):
+// 历史日期读日结表,今日实时聚合流水表,缺失日期补零保证图表连续。
+func (s *FinanceService) Trend(ctx context.Context, days int) ([]TrendPoint, error) {
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+	today := TodayCST()
+	base, _ := time.ParseInLocation("2006-01-02", today, cstLoc)
+	from := cstDate(base.AddDate(0, 0, -(days - 1)))
+	stmts, err := s.finance.ListStatements(from, today)
+	if err != nil {
+		return nil, err
+	}
+	byDate := make(map[string]model.DailyStatement, len(stmts))
+	for _, st := range stmts {
+		byDate[st.StatDate] = st
+	}
+	start, end, _ := DayRange(today)
+	sum, err := s.finance.SumFlows(start, end)
+	if err != nil {
+		return nil, err
+	}
+	points := make([]TrendPoint, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		d := cstDate(base.AddDate(0, 0, -i))
+		if d == today {
+			points = append(points, TrendPoint{
+				Date: d, PayAmount: sum.PayAmount, RefundAmount: sum.RefundAmount,
+				NetAmount: sum.PayAmount - sum.RefundAmount,
+			})
+			continue
+		}
+		if st, ok := byDate[d]; ok {
+			points = append(points, TrendPoint{
+				Date: d, PayAmount: st.PayAmount, RefundAmount: st.RefundAmount,
+				NetAmount: st.NetAmount,
+			})
+			continue
+		}
+		points = append(points, TrendPoint{Date: d}) // 无日结补零
+	}
+	return points, nil
+}
+
+// ---------- 对账 ----------
+
+// ReconcileSide 单侧对账结果(金额单位:分)。
+type ReconcileSide struct {
+	OrderTotal int64 `json:"order_total"` // 订单侧总额
+	FlowTotal  int64 `json:"flow_total"`  // 流水侧总额
+	Diff       int64 `json:"diff"`        // 差额 = 流水侧 - 订单侧
+	OrderCount int64 `json:"order_count"`
+	FlowCount  int64 `json:"flow_count"`
+}
+
+// ReconcileResp 一键对账结果:进账/退款双口径比对,不平给出差异明细。
+type ReconcileResp struct {
+	Balanced    bool                           `json:"balanced"`
+	PaySide     ReconcileSide                  `json:"pay_side"`
+	RefundSide  ReconcileSide                  `json:"refund_side"`
+	Mismatches  []repository.ReconcileMismatch `json:"mismatches,omitempty"`
+	GeneratedAt string                         `json:"generated_at"`
+}
+
+// Reconcile 一键对账:比对「订单表已支付总额」与「支付流水成功总额」,
+// 以及退款侧双口径;一致返回平账,不一致返回具体差额与差异订单明细。
+func (s *FinanceService) Reconcile(ctx context.Context) (*ReconcileResp, error) {
+	sums, err := s.finance.ReconcileSums()
+	if err != nil {
+		return nil, err
+	}
+	out := &ReconcileResp{
+		PaySide: ReconcileSide{
+			OrderTotal: sums.OrderPay, FlowTotal: sums.FlowPay,
+			Diff:       sums.FlowPay - sums.OrderPay,
+			OrderCount: sums.OrderPayCnt, FlowCount: sums.FlowPayCnt,
+		},
+		RefundSide: ReconcileSide{
+			OrderTotal: sums.OrderRefund, FlowTotal: sums.FlowRefund,
+			Diff:       sums.FlowRefund - sums.OrderRefund,
+			OrderCount: sums.OrderRefundCnt, FlowCount: sums.FlowRefundCnt,
+		},
+		GeneratedAt: time.Now().In(cstLoc).Format("2006-01-02 15:04:05"),
+	}
+	out.Balanced = out.PaySide.Diff == 0 && out.RefundSide.Diff == 0
+	if !out.Balanced {
+		if out.Mismatches, err = s.finance.MismatchList(20); err != nil {
+			return nil, err
+		}
+	}
+	logger.Info(ctx, "一键对账执行", zap.Bool("balanced", out.Balanced),
+		zap.Int64("pay_diff", out.PaySide.Diff), zap.Int64("refund_diff", out.RefundSide.Diff))
+	return out, nil
+}
+
+// ---------- 日结 ----------
+
+// StatementRunReq 手动日结请求:date 缺省昨天;days > 1 时回填 [date-days+1, date]。
+type StatementRunReq struct {
+	Date string `json:"date"`
+	Days int    `json:"days" binding:"gte=0,lte=366"`
+}
+
+// RunDailyStatement 聚合指定日期(北京时间)的成功流水写日结表,幂等。
+// date 缺省昨天;允许对当天执行(手动出快照)。
+func (s *FinanceService) RunDailyStatement(ctx context.Context, date string) error {
+	if date == "" {
+		date = cstDate(time.Now().AddDate(0, 0, -1))
+	}
+	start, end, err := DayRange(date)
+	if err != nil {
+		return resp.NewBiz(resp.CodeParamError, err.Error())
+	}
+	sum, err := s.finance.SumFlows(start, end)
+	if err != nil {
+		return err
+	}
+	st := &model.DailyStatement{
+		StatDate:     date,
+		PayAmount:    sum.PayAmount,
+		RefundAmount: sum.RefundAmount,
+		NetAmount:    sum.PayAmount - sum.RefundAmount,
+		PayCount:     int(sum.PayCount),
+		RefundCount:  int(sum.RefundCount),
+	}
+	if err := s.finance.UpsertStatement(st); err != nil {
+		return err
+	}
+	logger.Info(ctx, "日结完成", zap.String("stat_date", date),
+		zap.Int64("pay", sum.PayAmount), zap.Int64("refund", sum.RefundAmount),
+		zap.Int64("net", st.NetAmount))
+	return nil
+}
+
+// RunStatements 手动触发日结:单日或区间回填,返回完成天数。
+func (s *FinanceService) RunStatements(ctx context.Context, req StatementRunReq) (int, error) {
+	if req.Date == "" {
+		req.Date = cstDate(time.Now().AddDate(0, 0, -1))
+	}
+	base, err := time.ParseInLocation("2006-01-02", req.Date, cstLoc)
+	if err != nil {
+		return 0, resp.NewBiz(resp.CodeParamError, "日期格式应为 YYYY-MM-DD")
+	}
+	if req.Date > TodayCST() { // ISO 日期字符串可直接字典序比较
+		return 0, resp.NewBiz(resp.CodeParamError, "不能对未来日期日结")
+	}
+	days := req.Days
+	if days <= 0 {
+		days = 1
+	}
+	done := 0
+	for i := days - 1; i >= 0; i-- {
+		if err := s.RunDailyStatement(ctx, cstDate(base.AddDate(0, 0, -i))); err != nil {
+			return done, err
+		}
+		done++
+	}
+	return done, nil
+}
+
+// ListStatements 日结账单分页(对账管理页展示)。
+func (s *FinanceService) ListStatements(ctx context.Context, page, pageSize int) (*PageList, error) {
+	list, total, err := s.finance.ListStatementsPage(page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return &PageList{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
