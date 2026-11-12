@@ -112,8 +112,8 @@ task web:dev                # 前端 :5173,/api 代理到 8080
 
 或使用一条命令:`task dev`(起基础设施后在后台拉起前后端)。
 
-生产部署见 **[DEPLOY.md](DEPLOY.md)**:ghcr.io 镜像 + `docker-compose.prod.yml` 单机编排、
-HTTPS、升级回滚、备份与监控。
+生产部署见 **[DEPLOY.md](DEPLOY.md)**:GitHub Actions → 腾讯云镜像仓库(TCR)→ SSH 自动
+部署到腾讯云服务器;`docker-compose.prod.yml` 单机编排、HTTPS、升级回滚、备份与监控。
 
 ### 端口说明(重要)
 
@@ -299,16 +299,17 @@ viper 封装在包内,业务代码禁止 import viper、禁止临时 `viper.GetS
 - **frontend job**:Node 20,`npm ci` → `vue-tsc --noEmit` → `npm run build`。
 - 任一 job 失败即 CI 失败。
 
-### CD(`.github/workflows/cd.yml`)—— 镜像构建 + 可选部署
+### CD(`.github/workflows/cd.yml`)—— 镜像构建 + 自动部署(腾讯云)
 
 - 触发:push 到 `main` 或打 `v*.*.*` 标签。
 - 后端多阶段 Dockerfile(`golang:1.23-alpine` 编译 `CGO_ENABLED=0` 静态二进制 →
   `alpine:3.20` 非 root 运行);前端多阶段 Dockerfile(node 构建 → `nginx:1.27-alpine`,
   Nginx 托管 SPA 并将 `/api` 反代到后端容器)。
-- 镜像推送 `ghcr.io`:分支名 + `sha-xxxxxxx`;tag 发布时额外推
-  `1.2.3` / `1.2` / `latest` 语义化版本。凭据仅用内置 `GITHUB_TOKEN`,仓库零明文密钥。
-- `deploy` job 默认 `if: false` 禁用;启用时在仓库 Secrets 配置
-  `SSH_HOST` / `SSH_USER` / `SSH_KEY` 后删除该行即可。
+- 镜像推送**腾讯云镜像仓库 TCR**(地址/命名空间经仓库 Variables `TCR_REGISTRY` /
+  `TCR_NAMESPACE` 注入,凭证走 Secrets):分支名 + `sha-xxxxxxx`;tag 发布时额外推
+  `1.2.3` / `1.2` / `latest` 语义化版本。仓库零明文密钥。
+- `deploy` job 经 SSH 自动部署到腾讯云服务器,由 Variable `DEPLOY_ENABLED=true` 开启
+  (配合 `SSH_HOST` / `SSH_USER` / `SSH_KEY` Secrets);完整步骤见 **[DEPLOY.md](DEPLOY.md)**。
 
 ## 本地测试
 

@@ -1,8 +1,21 @@
-# CD:main 分支推送或 v* 标签时构建前后端镜像并推送 ghcr.io。
+# CD:main 分支推送或 v* 标签时,构建前后端镜像推送到【腾讯云镜像仓库 TCR】,
+# 并可选自动 SSH 部署到腾讯云服务器。
+#
+# ── 需先在仓库 Settings → Secrets and variables → Actions 配置 ──
+# Variables(非敏感):
+#   TCR_REGISTRY   镜像仓库域名,如 ccr.ccs.tencentyun.com(个人版)
+#                  或 <实例名>-tcr.tencentcloudcr.com(企业版)
+#   TCR_NAMESPACE  TCR 内的命名空间(建议小写)
+#   DEPLOY_ENABLED true 时启用自动部署(不配置则只构建推送)
+# Secrets(敏感):
+#   TCR_USERNAME / TCR_PASSWORD   TCR 访问凭证(企业版:控制台「访问凭证」
+#                                  新建长期凭证;个人版注意临时密码时效)
+#   SSH_HOST / SSH_USER / SSH_KEY 腾讯云服务器地址 / 登录用户 / 私钥全文
+#
 # 镜像 tag 规则(docker/metadata-action):
 #   main 分支推送 → :main + :sha-xxxxxxx
 #   v1.2.3 标签    → :1.2.3 + :1.2 + :latest
-# 所有凭据来自 GitHub Secrets / GITHUB_TOKEN,仓库中不出现明文密钥。
+# 服务器 /opt/fawn-mall/.env 里 TAG=main 自动跟随主干,TAG=v1.2.3 / sha-xxx 固定版本。
 name: CD
 
 on:
@@ -10,37 +23,26 @@ on:
     branches: [main]
     tags: ['v*.*.*']
 
-env:
-  REGISTRY: ghcr.io
-
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   build-server:
-    name: 构建并推送后端镜像
+    name: 构建并推送后端镜像 → TCR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # ghcr 要求全小写镜像路径,仓库名可能含大写
-      - name: 计算小写镜像名
-        id: image
-        run: echo "name=${GITHUB_REPOSITORY,,}/fawn-server" >> "$GITHUB_OUTPUT"
-
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: 登录腾讯云镜像仓库
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ vars.TCR_REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          images: ${{ vars.TCR_REGISTRY }}/${{ vars.TCR_NAMESPACE }}/fawn-server
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -58,27 +60,24 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-web:
-    name: 构建并推送前端镜像
+    name: 构建并推送前端镜像 → TCR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: 计算小写镜像名
-        id: image
-        run: echo "name=${GITHUB_REPOSITORY,,}/fawn-web" >> "$GITHUB_OUTPUT"
-
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: 登录腾讯云镜像仓库
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ vars.TCR_REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          images: ${{ vars.TCR_REGISTRY }}/${{ vars.TCR_NAMESPACE }}/fawn-web
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -95,25 +94,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 可选部署 job:默认禁用(if: false)。
-  # 启用方式:仓库 Settings → Secrets and variables → Actions 配置
-  #   SSH_HOST:服务器地址  SSH_USER:登录用户  SSH_KEY:私钥全文
-  # 然后把下方 `if: false` 删除即可。服务器上需预置 docker-compose.prod.yml。
+  # 自动部署:构建推送成功后 SSH 到腾讯云服务器拉取并重启。
+  # 开关:仓库 Variable DEPLOY_ENABLED=true;可在 Settings → Environments →
+  # production 配置 Required reviewers 增加人工确认。
   deploy:
-    name: SSH 部署(可选,默认禁用)
+    name: SSH 自动部署到腾讯云(按 DEPLOY_ENABLED 开关)
     runs-on: ubuntu-latest
     needs: [build-server, build-web]
-    if: false # 显式禁用,避免误发布
+    if: vars.DEPLOY_ENABLED == 'true'
     environment: production
     steps:
-      - name: 拉取最新镜像并重启
+      - name: 登录 TCR 并拉取最新镜像重启
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -e
             cd /opt/fawn-mall
+            echo '${{ secrets.TCR_PASSWORD }}' | docker login ${{ vars.TCR_REGISTRY }} -u '${{ secrets.TCR_USERNAME }}' --password-stdin
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
+            docker compose -f docker-compose.prod.yml ps

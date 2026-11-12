@@ -1,13 +1,16 @@
 # ============================================================================
-# 小鹿童装 Fawn Mall — 生产环境编排
+# 小鹿童装 Fawn Mall — 生产环境编排(腾讯云)
 # 与 docker-compose.yml(本地开发,源码构建)的区别:
-#   1. 前后端直接拉取 ghcr.io 镜像,不在服务器上构建;
-#   2. 基础设施端口只绑定 127.0.0.1,公网仅暴露 Web 入口(建议由宿主 Nginx + TLS 反代);
-#   3. 镜像 tag 经 TAG 环境变量固定,便于版本回滚(.env 中 TAG=sha-xxxxxxx 或 v1.2.3)。
+#   1. 前后端直接拉取腾讯云镜像仓库(TCR)镜像,不在服务器上构建;
+#   2. 基础设施端口只绑定 127.0.0.1,公网仅暴露 Web 入口(由宿主 Nginx + TLS 反代);
+#   3. 镜像地址与 tag 全部参数化:.env 中 REGISTRY/NAMESPACE/TAG。
+#      个人版 REGISTRY=ccr.ccs.tencentyun.com;企业版为 <实例名>-tcr.tencentcloudcr.com;
+#      CVM 与 TCR 同地域时走内网拉取(免公网流量费)。
 #
 # 服务器目录约定:/opt/fawn-mall(本文件 + .env)
 # 用法:
 #   cd /opt/fawn-mall
+#   docker login $REGISTRY        # TCR 访问凭证(镜像私有,先登录)
 #   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
 # 详细步骤见 DEPLOY.md。
@@ -72,9 +75,9 @@ services:
       timeout: 10s
       retries: 12
 
-  # 后端:ghcr.io 镜像,静态二进制,非 root 运行(见 server/Dockerfile)
+  # 后端:TCR 镜像,静态二进制,非 root 运行(见 server/Dockerfile)
   server:
-    image: ghcr.io/ljl0628/tz-mall/fawn-server:${TAG:-latest}
+    image: ${REGISTRY:?请在 .env 设置 REGISTRY(如 ccr.ccs.tencentyun.com)}/${NAMESPACE:?请在 .env 设置 NAMESPACE}/fawn-server:${TAG:-latest}
     container_name: fawn-server
     restart: unless-stopped
     environment:
@@ -109,7 +112,7 @@ services:
 
   # 前端:Nginx 托管 SPA 并反代 /api → server(见 web/nginx.conf)
   web:
-    image: ghcr.io/ljl0628/tz-mall/fawn-web:${TAG:-latest}
+    image: ${REGISTRY:?}/${NAMESPACE:?}/fawn-web:${TAG:-latest}
     container_name: fawn-web
     restart: unless-stopped
     ports:
