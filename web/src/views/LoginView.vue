@@ -42,8 +42,9 @@ async function handleLogin() {
 
 async function handleRegister() {
   const f = regForm.value
-  if (!f.username || f.username.length < 3) {
-    toast('用户名至少 3 位字母或数字', 'warning')
+  // 与后端 binding:"min=3,max=32,alphanum" 保持一致,前置拦截给出友好提示
+  if (!/^[a-zA-Z0-9]{3,32}$/.test(f.username)) {
+    toast('用户名仅支持 3-32 位字母或数字', 'warning')
     return
   }
   if (f.password.length < 6) {

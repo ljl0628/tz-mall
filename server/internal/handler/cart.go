@@ -31,7 +31,7 @@ func (h *CartHandler) Get(c *gin.Context) {
 func (h *CartHandler) Add(c *gin.Context) {
 	var req service.AddReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	if err := h.cart.Add(c.Request.Context(), middleware.GetClaims(c).UserID, req); err != nil {
@@ -45,7 +45,7 @@ func (h *CartHandler) Add(c *gin.Context) {
 func (h *CartHandler) Update(c *gin.Context) {
 	var req service.UpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	if err := h.cart.Update(c.Request.Context(), middleware.GetClaims(c).UserID, c.Param("field"), req); err != nil {

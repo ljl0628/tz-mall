@@ -22,7 +22,7 @@ func NewOrderHandler(o *service.OrderService) *OrderHandler { return &OrderHandl
 func (h *OrderHandler) Place(c *gin.Context) {
 	var req service.PlaceReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	out, err := h.orders.Place(c.Request.Context(), middleware.GetClaims(c).UserID, req)

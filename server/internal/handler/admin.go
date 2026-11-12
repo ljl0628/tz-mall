@@ -43,7 +43,7 @@ func (h *AdminHandler) ListProducts(c *gin.Context) {
 func (h *AdminHandler) CreateProduct(c *gin.Context) {
 	var in service.ProductInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	out, err := h.admin.CreateProduct(c.Request.Context(), in)
@@ -63,7 +63,7 @@ func (h *AdminHandler) UpdateProduct(c *gin.Context) {
 	}
 	var in service.ProductInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	if err := h.admin.UpdateProduct(c.Request.Context(), id, in); err != nil {
@@ -123,7 +123,7 @@ func (h *AdminHandler) ListCategories(c *gin.Context) {
 func (h *AdminHandler) CreateCategory(c *gin.Context) {
 	var in service.CategoryInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	out, err := h.admin.CreateCategory(c.Request.Context(), in)
@@ -143,7 +143,7 @@ func (h *AdminHandler) UpdateCategory(c *gin.Context) {
 	}
 	var in service.CategoryInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	if err := h.admin.UpdateCategory(c.Request.Context(), id, in); err != nil {

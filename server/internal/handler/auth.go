@@ -20,7 +20,7 @@ func NewAuthHandler(auth *service.AuthService) *AuthHandler { return &AuthHandle
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req service.RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+err.Error()))
+		resp.Fail(c, resp.NewBiz(resp.CodeParamError, "参数错误:"+bindErrMsg(err)))
 		return
 	}
 	out, err := h.auth.Register(c.Request.Context(), req)
