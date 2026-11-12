@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -26,18 +25,10 @@ import (
 )
 
 func main() {
-	// 1. 配置:config.yaml + 环境变量覆盖(TZ_ 前缀)
-	cfgPath := os.Getenv("TZ_CONFIG_PATH")
-	if cfgPath == "" {
-		cfgPath = "config/config.yaml"
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-		os.Exit(1)
-	}
+	// 1. 配置:viper 加载(环境变量 > config.{env}.yaml > config.yaml > 默认值),启动即强校验
+	cfg := config.MustLoad()
 	logger.Init(cfg.Log.Level)
-	logger.Info("配置加载完成", "mode", cfg.Server.Mode, "port", cfg.Server.Port)
+	logger.Info("配置加载完成(密码已脱敏)", "effective", cfg.MaskedSummary())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -82,9 +73,10 @@ func main() {
 	stockRepo := repository.NewCacheStock(rdb)
 	blackRepo := repository.NewBlacklist(rdb)
 
-	jwtMgr := jwtx.New(cfg.JWT.Secret, cfg.JWT.ExpireHours)
+	jwtMgr := jwtx.New(cfg.JWT.Secret, cfg.JWT.Expire)
 	userState := repository.NewUserState(rdb, jwtMgr.ExpireDuration())
-	mqClient := mq.New(cfg.RabbitMQ.URL, cfg.Order.PayTimeoutSeconds, cfg.Order.MaxRetry)
+	mqClient := mq.New(cfg.RabbitMQ.URL, cfg.Order.PayTimeoutSeconds, cfg.Order.MaxRetry,
+		cfg.RabbitMQ.ReconnectInterval, cfg.RabbitMQ.OpTimeout)
 
 	authSvc := service.NewAuthService(userRepo, blackRepo, jwtMgr)
 	productSvc := service.NewProductService(productRepo, categoryRepo, cacheRepo)
@@ -113,8 +105,10 @@ func main() {
 		Admin:   handler.NewAdminHandler(adminSvc),
 	})
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: router,
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 	go func() {
 		logger.Info("HTTP 服务启动", "addr", srv.Addr)
@@ -124,10 +118,10 @@ func main() {
 		}
 	}()
 
-	// 8. 优雅关停
+	// 8. 优雅关停(预算来自 server.shutdown_timeout:HTTP → MQ → Redis → MySQL 依次关闭)
 	<-ctx.Done()
 	logger.Info("收到退出信号,开始优雅关停")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP 关停异常", "err", err)

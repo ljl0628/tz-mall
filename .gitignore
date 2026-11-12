@@ -18,6 +18,14 @@ web/*.local
 .env
 .env.local
 
+# === 真实配置与日志(仓库只保留 config.example.yaml) ===
+server/config/config.yaml
+server/config/config.*.yaml
+!server/config/config.example.yaml
+server/logs/
+logs/
+
+
 # === IDE / 系统 ===
 .idea/
 .vscode/

@@ -14,9 +14,9 @@ version: "3"
 # 本项目基础设施统一映射到 3316 / 6381 / 5673(见 docker-compose.yml),
 # 容器内部与 CI(GitHub Actions services)仍为标准端口。
 env:
-  TZ_MYSQL_PORT: "3316"
-  TZ_REDIS_ADDR: 127.0.0.1:6381
-  TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+  APP_DB_PORT: "3316"
+  APP_REDIS_ADDR: 127.0.0.1:6381
+  APP_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
 
 tasks:
   dev:
@@ -32,9 +32,9 @@ tasks:
     cmds:
       - cmd: go run ./cmd/server
         env:
-          TZ_MYSQL_PORT: "3316"
-          TZ_REDIS_ADDR: 127.0.0.1:6381
-          TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+          APP_DB_PORT: "3316"
+          APP_REDIS_ADDR: 127.0.0.1:6381
+          APP_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
         background: true
 
   start-web:
@@ -56,9 +56,9 @@ tasks:
     cmds:
       - go run ./cmd/server
     env:
-      TZ_MYSQL_PORT: "3316"
-      TZ_REDIS_ADDR: 127.0.0.1:6381
-      TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+      APP_DB_PORT: "3316"
+      APP_REDIS_ADDR: 127.0.0.1:6381
+      APP_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
 
   web:dev:
     desc: 本地运行前端 Vite 开发服务器(默认 :5173,代理 /api 到 8080)
@@ -74,9 +74,9 @@ tasks:
       - test -z "$(gofmt -l .)"
       - go test -p 1 -count=1 ./...
     env:
-      TZ_MYSQL_PORT: "3316"
-      TZ_REDIS_ADDR: 127.0.0.1:6381
-      TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+      APP_DB_PORT: "3316"
+      APP_REDIS_ADDR: 127.0.0.1:6381
+      APP_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
 
   server:build:
     desc: 编译后端二进制

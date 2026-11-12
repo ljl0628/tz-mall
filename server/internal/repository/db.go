@@ -2,7 +2,6 @@ package repository
 
 import (
 	"fmt"
-	"time"
 
 	"fawn-mall/pkg/config"
 
@@ -11,7 +10,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// NewDB 建立 GORM(MySQL)连接。
+// NewDB 建立 GORM(MySQL)连接,连接池参数来自配置(db.max_* 系列)。
 func NewDB(cfg *config.Config) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
@@ -23,8 +22,8 @@ func NewDB(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetMaxIdleConns(cfg.DB.MaxIdleConns)
+	sqlDB.SetMaxOpenConns(cfg.DB.MaxOpenConns)
+	sqlDB.SetConnMaxLifetime(cfg.DB.ConnMaxLifetime)
 	return db, nil
 }

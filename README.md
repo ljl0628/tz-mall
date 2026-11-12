@@ -64,7 +64,7 @@ tz-mall/
 │   └── cd.yml                # 镜像构建推送 ghcr.io + 可选 SSH 部署
 ├── server/                   # Go 后端
 │   ├── cmd/server/main.go    # 入口:配置→迁移→种子→MQ→HTTP→优雅退出
-│   ├── config/config.yaml    # 默认配置(生产用 TZ_* 环境变量覆盖)
+│   ├── config/config.example.yaml # 配置示例(真实 config.yaml 不入库,APP_* 环境变量覆盖)
 │   └── internal/
 │       ├── handler/          # 路由 + 参数绑定校验 + 统一响应
 │       ├── service/          # 业务逻辑(下单/支付/取消/金额计算...)
@@ -118,13 +118,13 @@ task web:dev                # 前端 :5173,/api 代理到 8080
 
 | 服务 | 宿主机端口 | 容器内端口 | 环境变量覆盖 |
 | --- | --- | --- | --- |
-| MySQL | **3316** | 3306 | `TZ_MYSQL_PORT` |
-| Redis | **6381** | 6379 | `TZ_REDIS_ADDR` |
-| RabbitMQ | **5673** / 15673 | 5672 / 15672 | `TZ_RABBITMQ_URL` |
-| Go 后端 | 8080 | 8080 | `TZ_SERVER_PORT` |
+| MySQL | **3316** | 3306 | `APP_DB_PORT` |
+| Redis | **6381** | 6379 | `APP_REDIS_ADDR` |
+| RabbitMQ | **5673** / 15673 | 5672 / 15672 | `APP_RABBITMQ_URL` |
+| Go 后端 | 8080 | 8080 | `APP_SERVER_PORT` |
 | 前端 dev / 容器 | 5173 / 8090 | 5173 / 80 | — |
 
-所有连接参数都收敛在 `TZ_*` 环境变量(见 `server/pkg/config/config.go`),
+所有连接参数收敛在 `APP_*` 环境变量(viper 加载,优先级:环境变量 > config.{env}.yaml > config.yaml > 默认值,见 `server/pkg/config/config.go`),
 本地跑测试时 `testutil` 默认使用上表宿主机端口,CI 中覆盖为标准端口。
 
 ### 测试账号(种子数据)
@@ -254,7 +254,7 @@ JWT 无状态,签发后无法撤销——管理员封禁某用户后,其手中�
 ### CI(`.github/workflows/ci.yml`)—— 真实依赖,禁止 mock
 
 - **backend job**:GitHub Actions 服务容器拉起真实 **MySQL 8 / Redis 7 / RabbitMQ 3.13**
-  (与 docker-compose 同版本),端口与口令经 `TZ_*` 环境变量注入测试。
+  (与 docker-compose 同版本),端口与口令经 `APP_*` 环境变量注入测试。
   依次执行 `gofmt` 检查 → `go vet` → `go build` → `go test -p 1 -count=1 ./...`
   (覆盖库存 Lua 并发预扣、订单金额计算、超时取消回补、MySQL 条件更新防超卖、
   TTL+DLX 延迟链路端到端)。`-p 1` 串行避免测试共享中间件时互踩。

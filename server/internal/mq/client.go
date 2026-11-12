@@ -26,8 +26,8 @@ const (
 	ExchangeDLX      = "fawn.order.dlx"     // 死信交换机
 	RoutingCancel    = "fawn.cancel"
 
-	reconnectInterval = 3 * time.Second
-	publishAttempts   = 3
+	publishRetryWait = time.Second // 发布失败重连后的等待
+	publishAttempts  = 3
 )
 
 // ErrAck 业务终态错误:消息应答(不重试),仅记录日志。
@@ -39,9 +39,11 @@ type Handler func(body []byte) error
 
 // Client RabbitMQ 客户端。
 type Client struct {
-	url      string
-	delayTTL int // 延迟队列消息 TTL(毫秒)
-	maxRetry int
+	url               string
+	delayTTL          int // 延迟队列消息 TTL(毫秒)
+	maxRetry          int
+	reconnectInterval time.Duration
+	opTimeout         time.Duration
 
 	mu       sync.Mutex
 	conn     *amqp.Connection
@@ -52,12 +54,15 @@ type Client struct {
 }
 
 // New 创建客户端(尚未连接,调用 Run 后自动连接与重连)。
-func New(url string, payTimeoutSeconds, maxRetry int) *Client {
+// 超时参数均来自配置(rabbitmq.reconnect_interval / op_timeout)。
+func New(url string, payTimeoutSeconds, maxRetry int, reconnectInterval, opTimeout time.Duration) *Client {
 	return &Client{
-		url:      url,
-		delayTTL: payTimeoutSeconds * 1000,
-		maxRetry: maxRetry,
-		handlers: make(map[string]Handler),
+		url:               url,
+		delayTTL:          payTimeoutSeconds * 1000,
+		maxRetry:          maxRetry,
+		reconnectInterval: reconnectInterval,
+		opTimeout:         opTimeout,
+		handlers:          make(map[string]Handler),
 	}
 }
 
@@ -80,7 +85,7 @@ func (c *Client) Run(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(reconnectInterval):
+			case <-time.After(c.reconnectInterval):
 			}
 			continue
 		}
@@ -116,7 +121,7 @@ func (c *Client) Run(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(reconnectInterval):
+			case <-time.After(c.reconnectInterval):
 			}
 		}
 	}
@@ -304,7 +309,7 @@ func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, 
 	if retry > c.maxRetry {
 		logger.Error("MQ 消费重试超限,转入停车队列", "queue", queue,
 			"retry", retry, "err", err, "body", string(d.Body))
-		parkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		parkCtx, cancel := context.WithTimeout(context.Background(), c.opTimeout)
 		if perr := c.PublishRaw(parkCtx, QueueParking, d.Body, amqp.Table{
 			"x-origin-queue": queue,
 			"x-last-error":   err.Error(),
@@ -322,7 +327,7 @@ func (c *Client) handleMessage(ch *amqp.Channel, queue string, d amqp.Delivery, 
 	logger.Warn("MQ 消费失败,延迟重试", "queue", queue, "retry", retry,
 		"cost_ms", time.Since(start).Milliseconds(), "err", err)
 	// 重发一条带新计数的新消息,确认旧消息(避免 requeue 死循环且保证不丢)
-	pubCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	pubCtx, cancel := context.WithTimeout(context.Background(), c.opTimeout)
 	if perr := c.PublishRaw(pubCtx, queue, d.Body, amqp.Table{"x-retry": int32(retry)}); perr != nil {
 		logger.Error("重发失败,消息将重新入队", "err", perr)
 		_ = d.Nack(false, true)

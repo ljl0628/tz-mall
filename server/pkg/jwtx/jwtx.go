@@ -18,18 +18,18 @@ type Claims struct {
 
 // Manager JWT 签发器。
 type Manager struct {
-	secret      []byte
-	expireHours int
+	secret []byte
+	expire time.Duration
 }
 
-// New 构造 Manager。
-func New(secret string, expireHours int) *Manager {
-	return &Manager{secret: []byte(secret), expireHours: expireHours}
+// New 构造 Manager,expire 为 token 有效期(来自配置 jwt.expire)。
+func New(secret string, expire time.Duration) *Manager {
+	return &Manager{secret: []byte(secret), expire: expire}
 }
 
 // ExpireDuration 返回 token 有效期。
 func (m *Manager) ExpireDuration() time.Duration {
-	return time.Duration(m.expireHours) * time.Hour
+	return m.expire
 }
 
 // Generate 签发 token。

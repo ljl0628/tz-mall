@@ -55,14 +55,14 @@ jobs:
 
     env:
       # CI 服务监听 localhost 标准端口,与本地开发(3316/6381/5673)不同,统一覆盖
-      TZ_MYSQL_HOST: 127.0.0.1
-      TZ_MYSQL_PORT: '3306'
-      TZ_MYSQL_USER: fawn
-      TZ_MYSQL_PASSWORD: fawn_ci_pw
-      TZ_MYSQL_DATABASE: fawn_mall_test # 测试库与开发库隔离;root 自动创建
-      TZ_MYSQL_ROOT_PASSWORD: fawn_root_ci
-      TZ_REDIS_ADDR: 127.0.0.1:6379
-      TZ_RABBITMQ_URL: amqp://fawn:fawn_ci_pw@127.0.0.1:5672/
+      APP_DB_HOST: 127.0.0.1
+      APP_DB_PORT: '3306'
+      APP_DB_USER: fawn
+      APP_DB_PASSWORD: fawn_ci_pw
+      APP_DB_NAME: fawn_mall_test # 测试库与开发库隔离;root 自动创建
+      APP_MYSQL_ROOT_PASSWORD: fawn_root_ci
+      APP_REDIS_ADDR: 127.0.0.1:6379
+      APP_RABBITMQ_URL: amqp://fawn:fawn_ci_pw@127.0.0.1:5672/
 
     defaults:
       run:

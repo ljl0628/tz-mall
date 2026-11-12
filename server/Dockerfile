@@ -27,8 +27,9 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 WORKDIR /app
 COPY --from=builder /out/fawn-server ./fawn-server
-# 内置默认配置;生产通过 TZ_* 环境变量覆盖(docker-compose.yml),密钥不进镜像
-COPY config/config.yaml ./config/config.yaml
+# 镜像内只内置示例配置作为兜底默认值;真实配置经 APP_* 环境变量注入
+# (docker-compose.yml),密钥不进镜像。logs 目录挂载宿主机时在此写入。
+COPY config/config.example.yaml ./config/config.yaml
 
 USER app
 EXPOSE 8080

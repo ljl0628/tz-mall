@@ -1,6 +1,6 @@
 // Package testutil 测试基础设施:连接真实 MySQL / Redis / RabbitMQ(禁止 mock 依赖)。
-// 环境变量与运行时配置一致(TZ_ 前缀),默认指向本地 docker compose 起的服务;
-// CI 中 GitHub Actions services 同样监听 localhost,无需额外配置。
+// 环境变量与运行时配置一致(APP_ 前缀),默认指向本地 docker compose 起的服务;
+// CI 中 GitHub Actions services 同样监听 localhost,经 APP_* 环境变量覆盖。
 package testutil
 
 import (
@@ -37,11 +37,11 @@ func env(key, def string) string {
 // 端口默认 3316 与 docker-compose 宿主映射一致,CI 中通过环境变量覆盖)。
 func MySQLDSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		env("TZ_MYSQL_USER", "fawn"),
-		env("TZ_MYSQL_PASSWORD", "fawn_dev_123"),
-		env("TZ_MYSQL_HOST", "127.0.0.1"),
-		env("TZ_MYSQL_PORT", "3316"),
-		env("TZ_MYSQL_DATABASE", "fawn_mall_test"),
+		env("APP_DB_USER", "fawn"),
+		env("APP_DB_PASSWORD", "fawn_dev_123"),
+		env("APP_DB_HOST", "127.0.0.1"),
+		env("APP_DB_PORT", "3316"),
+		env("APP_DB_NAME", "fawn_mall_test"),
 	)
 }
 
@@ -49,15 +49,15 @@ func MySQLDSN() string {
 // 地址默认 127.0.0.1:6381 与 docker-compose 宿主映射一致,CI 中覆盖)。
 func RedisClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
-		Addr:     env("TZ_REDIS_ADDR", "127.0.0.1:6381"),
-		Password: env("TZ_REDIS_PASSWORD", ""),
+		Addr:     env("APP_REDIS_ADDR", "127.0.0.1:6381"),
+		Password: env("APP_REDIS_PASSWORD", ""),
 		DB:       1,
 	})
 }
 
 // RabbitMQURL 测试 RabbitMQ 地址(默认 5673 与 docker-compose 宿主映射一致,CI 中覆盖)。
 func RabbitMQURL() string {
-	return env("TZ_RABBITMQ_URL", "amqp://fawn:fawn_dev_123@127.0.0.1:5673/")
+	return env("APP_RABBITMQ_URL", "amqp://fawn:fawn_dev_123@127.0.0.1:5673/")
 }
 
 // Setup 返回连接真实 MySQL 与 Redis 的测试基础设施(懒加载单例,AutoMigrate)。
@@ -91,17 +91,17 @@ func Setup(t *testing.T) (*gorm.DB, *redis.Client) {
 // provisionTestDB 用 root 连接创建测试库(若不存在)并授权应用账号,幂等。
 func provisionTestDB() {
 	rootDSN := fmt.Sprintf("root:%s@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local",
-		env("TZ_MYSQL_ROOT_PASSWORD", "fawn_root_dev"),
-		env("TZ_MYSQL_HOST", "127.0.0.1"),
-		env("TZ_MYSQL_PORT", "3316"),
+		env("APP_MYSQL_ROOT_PASSWORD", "fawn_root_dev"),
+		env("APP_DB_HOST", "127.0.0.1"),
+		env("APP_DB_PORT", "3316"),
 	)
 	root, err := sql.Open("mysql", rootDSN)
 	if err != nil {
 		return
 	}
 	defer root.Close()
-	user := env("TZ_MYSQL_USER", "fawn")
-	testDB := env("TZ_MYSQL_DATABASE", "fawn_mall_test")
+	user := env("APP_DB_USER", "fawn")
+	testDB := env("APP_DB_NAME", "fawn_mall_test")
 	_, _ = root.Exec("CREATE DATABASE IF NOT EXISTS " + testDB + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
 	_, _ = root.Exec(fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%%'", testDB, user))
 }
