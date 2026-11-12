@@ -72,6 +72,7 @@ func (s *OrderService) HandleOrderCreate(body []byte) error {
 
 	logger.Info(context.Background(), "MQ 消费:订单已落库并扣减 MySQL 库存",
 		zap.String("order_no", msg.OrderNo), zap.Uint64("user_id", msg.UserID),
+		zap.String("phone", logger.MaskPhone(msg.Phone)),
 		zap.Int64("amount", msg.TotalAmount), zap.Int("items", len(items)))
 
 	// 投递延迟取消消息:进入 TTL 延迟队列,15 分钟后死信到取消队列

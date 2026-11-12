@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"fawn-mall/pkg/jwtx"
 	"fawn-mall/pkg/logger"
@@ -50,6 +51,9 @@ func JWTAuth(jm *jwtx.Manager, bl TokenBlacklist, ug UserGuard) gin.HandlerFunc 
 		}
 		claims, err := jm.Parse(token)
 		if err != nil {
+			// token 无效/过期:warn 级留痕便于排查,token 脱敏只留前 6 位
+			logger.Warn(c.Request.Context(), "token 解析失败",
+				zap.String("token", logger.MaskToken(token)), zap.Error(err))
 			abortUnauthorized(c, "登录已过期,请重新登录")
 			return
 		}

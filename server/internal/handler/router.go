@@ -35,6 +35,14 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	// 调试端点:仅 debug 模式注册,用于验收 Recovery 中间件
+	// (统一 50001 + zap.Stack 错误日志 + 进程不退出),release 模式不存在。
+	if d.Cfg.Server.Mode == "debug" {
+		r.GET("/debug/panic", func(c *gin.Context) {
+			panic("手动触发 panic(调试端点,验证 Recovery 中间件)")
+		})
+	}
+
 	api := r.Group("/api/v1")
 
 	// 公开接口

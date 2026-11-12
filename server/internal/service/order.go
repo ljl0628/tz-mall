@@ -13,6 +13,7 @@ import (
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/mq"
 	"fawn-mall/internal/repository"
+	"fawn-mall/pkg/apperr"
 	"fawn-mall/pkg/logger"
 	"fawn-mall/pkg/resp"
 )
@@ -163,7 +164,7 @@ func (s *OrderService) Place(ctx context.Context, userID uint64, req PlaceReq) (
 			logger.Error(ctx, "下单 MQ 发布失败且回补库存失败,请人工核对",
 				zap.String("order_no", orderNo), zap.Error(rerr))
 		}
-		return nil, fmt.Errorf("下单失败,请稍后重试: %w", err)
+		return nil, apperr.Wrap("下单发布 order.create", fmt.Errorf("下单失败,请稍后重试: %w", err))
 	}
 
 	// 清理购物车中已结算的项
