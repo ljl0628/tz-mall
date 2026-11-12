@@ -89,11 +89,34 @@ type CartView struct {
 }
 
 // Get 查询购物车(合并商品实时信息)。
+// 商品与 SKU 各用一次批量查询(ID IN)装配,避免逐件 N+1:购物车 N 件商品
+// 恒定 2 条 SQL + 1 条 Redis List,与 N 无关。
 func (s *CartService) Get(ctx context.Context, userID uint64) (*CartView, error) {
 	items, err := s.cart.List(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]uint64, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ProductID)
+	}
+	productMap := make(map[uint64]*model.Product, len(ids))
+	if list, err := s.products.GetByIDs(ids); err == nil {
+		for i := range list {
+			productMap[list[i].ID] = &list[i]
+		}
+	}
+	// skuMap: productID → size → stock
+	skuMap := make(map[uint64]map[string]int, len(ids))
+	if skus, err := s.products.GetSKUsByProductIDs(ids); err == nil {
+		for _, sk := range skus {
+			if skuMap[sk.ProductID] == nil {
+				skuMap[sk.ProductID] = make(map[string]int)
+			}
+			skuMap[sk.ProductID][sk.Size] = sk.Stock
+		}
+	}
+
 	view := &CartView{Items: make([]CartItemView, 0, len(items))}
 	for _, it := range items {
 		v := CartItemView{
@@ -101,17 +124,10 @@ func (s *CartService) Get(ctx context.Context, userID uint64) (*CartView, error)
 			Quantity: it.Quantity, Selected: it.Selected,
 			Name: it.Name, Image: it.Image, Price: it.Price, AgeGroup: it.AgeGroup,
 		}
-		if p, err := s.products.GetByID(it.ProductID); err == nil && p != nil {
+		if p, ok := productMap[it.ProductID]; ok {
 			v.Name, v.Image, v.Price, v.AgeGroup = p.Name, p.Image, p.Price, p.AgeGroup
 			v.OffShelf = p.Status != model.ProductStatusOn
-			if skus, err := s.products.GetSKUs(it.ProductID); err == nil {
-				for _, sk := range skus {
-					if sk.Size == it.Size {
-						v.Stock = sk.Stock
-						break
-					}
-				}
-			}
+			v.Stock = skuMap[it.ProductID][it.Size]
 		} else {
 			v.OffShelf = true
 		}

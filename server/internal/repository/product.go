@@ -68,6 +68,26 @@ func (r *ProductRepo) GetByID(id uint64) (*model.Product, error) {
 	return &p, nil
 }
 
+// GetByIDs 批量查询商品(购物车合并实时信息,消除逐件查询的 N+1)。
+func (r *ProductRepo) GetByIDs(ids []uint64) ([]model.Product, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.Product
+	err := r.db.Where("id IN ?", ids).Find(&list).Error
+	return list, err
+}
+
+// GetSKUsByProductIDs 批量查询多个商品的 SKU(product_id IN)。
+func (r *ProductRepo) GetSKUsByProductIDs(productIDs []uint64) ([]model.SKU, error) {
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	var list []model.SKU
+	err := r.db.Where("product_id IN ?", productIDs).Order("id ASC").Find(&list).Error
+	return list, err
+}
+
 // GetSKUs 查询商品全部 SKU。
 func (r *ProductRepo) GetSKUs(productID uint64) ([]model.SKU, error) {
 	var list []model.SKU

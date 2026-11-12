@@ -14,6 +14,8 @@ import (
 func NewDB(cfg *config.Config) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+		// PrepareStmt 缓存预编译语句:列表/详情/库存等高频固定 SQL 省去每次往返的 prepare 开销
+		PrepareStmt: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("连接 MySQL: %w", err)

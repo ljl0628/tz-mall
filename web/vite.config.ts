@@ -22,5 +22,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // 大依赖拆独立 chunk:业务代码迭代不会让 element-plus/vue 重新下载,
+    // 配合 nginx 对 /assets/ 的 immutable 长缓存,日常发布用户只拉业务 chunk
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'element-plus': ['element-plus', '@element-plus/icons-vue'],
+          vue: ['vue', 'vue-router', 'pinia'],
+        },
+      },
+    },
   },
 })
