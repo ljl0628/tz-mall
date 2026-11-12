@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ---------- 构建阶段:编译静态二进制 ----------
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # 默认国内代理加速依赖下载;海外构建可 --build-arg GOPROXY=https://proxy.golang.org,direct
 ARG GOPROXY=https://goproxy.cn,direct

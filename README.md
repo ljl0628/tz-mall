@@ -8,7 +8,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Go 1.22 · Gin · GORM · golang-jwt/v5 · go-redis/v9 · amqp091-go |
+| 后端 | Go 1.23 · Gin · GORM · golang-jwt/v5 · go-redis/v9 · amqp091-go |
 | 前端 | Vue 3(`<script setup>` 组合式 API)· TypeScript · Vite · Pinia · Vue Router · Element Plus(**原生 fetch 封装,未用 axios**) |
 | 存储 | MySQL 8(业务数据)· Redis 7(商品缓存 / 购物车 / 登录态 / 库存预扣) |
 | 消息 | RabbitMQ 3.13(订单异步落库 + 延迟取消,confirm + manual ack + 重试) |
@@ -86,7 +86,7 @@ tz-mall/
 ### 前置要求
 
 - Docker + docker compose
-- Go 1.22+(跑后端开发与测试)
+- Go 1.23+(跑后端开发与测试)
 - Node 20+(前端开发)
 - [go-task](https://taskfile.dev)(可选,没有也可直接看 Taskfile.yml 里的原始命令)
 
@@ -264,7 +264,7 @@ JWT 无状态,签发后无法撤销——管理员封禁某用户后,其手中�
 ### CD(`.github/workflows/cd.yml`)—— 镜像构建 + 可选部署
 
 - 触发:push 到 `main` 或打 `v*.*.*` 标签。
-- 后端多阶段 Dockerfile(`golang:1.22-alpine` 编译 `CGO_ENABLED=0` 静态二进制 →
+- 后端多阶段 Dockerfile(`golang:1.23-alpine` 编译 `CGO_ENABLED=0` 静态二进制 →
   `alpine:3.20` 非 root 运行);前端多阶段 Dockerfile(node 构建 → `nginx:1.27-alpine`,
   Nginx 托管 SPA 并将 `/api` 反代到后端容器)。
 - 镜像推送 `ghcr.io`:分支名 + `sha-xxxxxxx`;tag 发布时额外推
