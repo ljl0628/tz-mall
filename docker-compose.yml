@@ -1,0 +1,103 @@
+# 小鹿童装 Fawn Mall — 一键环境编排
+# 用法:
+#   docker compose up -d                # 仅启动基础设施(MySQL/Redis/RabbitMQ),本地开发用
+#   docker compose up -d --build        # 全量启动(含前后端容器,生产形态)
+#   docker compose down                 # 停止并移除容器
+# 敏感配置支持 .env 覆盖(参考 .env.example),未设置时使用下方开发默认值。
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: fawn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fawn_root_dev}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fawn_mall}
+      MYSQL_USER: ${MYSQL_USER:-fawn}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fawn_dev_123}
+      TZ: Asia/Shanghai
+    ports:
+      - "3316:3306" # 宿主机 3306 常被占用,统一使用 3316(容器间互访仍是 3306)
+    volumes:
+      - fawn-mysql-data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pfawn_root_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: fawn-redis
+    restart: unless-stopped
+    # 开启 AOF 持久化,重启后购物车/预扣库存不丢失
+    command: redis-server --appendonly yes --appendfsync everysec
+    ports:
+      - "6381:6379" # 宿主机 6379 常被占用,统一使用 6381(容器间互访仍是 6379)
+    volumes:
+      - fawn-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: fawn-rabbitmq
+    restart: unless-stopped
+    environment:
+      # guest 账号仅允许容器内访问,必须创建自定义账号供宿主机/后端连接
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-fawn}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-fawn_dev_123}
+    ports:
+      - "5673:5672"     # AMQP(宿主机 5672 常被占用,统一使用 5673)
+      - "15673:15672"   # 管理控制台 http://localhost:15673
+    volumes:
+      - fawn-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # 后端:多阶段构建产物为静态编译二进制(CGO_ENABLED=0),见 server/Dockerfile
+  server:
+    build:
+      context: ./server
+    container_name: fawn-server
+    restart: unless-stopped
+    environment:
+      TZ_SERVER_MODE: release
+      TZ_MYSQL_HOST: mysql
+      TZ_MYSQL_PORT: "3306"
+      TZ_MYSQL_USER: ${MYSQL_USER:-fawn}
+      TZ_MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fawn_dev_123}
+      TZ_MYSQL_DATABASE: ${MYSQL_DATABASE:-fawn_mall}
+      TZ_REDIS_ADDR: redis:6379
+      TZ_RABBITMQ_URL: amqp://${RABBITMQ_USER:-fawn}:${RABBITMQ_PASSWORD:-fawn_dev_123}@rabbitmq:5672/
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 前端:Nginx 承载 dist 并将 /api 反代到 server,见 web/Dockerfile
+  web:
+    build:
+      context: ./web
+    container_name: fawn-web
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    depends_on:
+      - server
+
+volumes:
+  fawn-mysql-data:
+  fawn-redis-data:
+  fawn-rabbitmq-data:

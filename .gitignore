@@ -1,0 +1,32 @@
+# === 后端 ===
+server/bin/
+server/fawn-server
+server/fawn-server.exe
+*.log
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# === 前端 ===
+web/node_modules/
+web/dist/
+web/*.local
+
+# === 本地环境(不含敏感默认值时才提交) ===
+.env
+.env.local
+
+# === IDE / 系统 ===
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# === 本地工作目录(非项目交付物) ===
+.claude/
+.playwright-mcp/
+admin-products.jpeg
+bindo-mall-prompt.md

@@ -1,0 +1,218 @@
+/* 小鹿童装全局样式:温暖明快的暖色系,圆角卡片,克制不幼稚。 */
+:root {
+  --fawn-primary: #e8734a;        /* 陶土橘 */
+  --fawn-primary-light: #f7a97f;
+  --fawn-primary-bg: #fdf3ec;
+  --fawn-bg: #faf7f3;             /* 米白背景 */
+  --fawn-text: #3d2f28;           /* 深棕文字 */
+  --fawn-text-sub: #8c7b70;
+  --fawn-card: #ffffff;
+  --fawn-border: #f0e4da;
+  --fawn-radius: 14px;
+
+  /* 覆盖 Element Plus 主色为品牌暖色 */
+  --el-color-primary: var(--fawn-primary);
+  --el-color-primary-light-3: #efa080;
+  --el-color-primary-light-5: #f4bda4;
+  --el-color-primary-light-7: #f9dbcb;
+  --el-color-primary-light-8: #fbe7da;
+  --el-color-primary-light-9: #fdf2ea;
+  --el-color-primary-dark-2: #d05f38;
+  --el-border-radius-base: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--fawn-bg);
+  color: var(--fawn-text);
+  font-family:
+    'PingFang SC',
+    'HarmonyOS Sans SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 顶部导航 ---------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--fawn-border);
+}
+
+.topbar-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--fawn-text);
+  font-weight: 700;
+  font-size: 19px;
+}
+
+.brand-deer {
+  font-size: 26px;
+}
+
+.brand-name {
+  letter-spacing: 1px;
+}
+
+.top-nav {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--fawn-text-sub);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 15px;
+  transition: all 0.2s;
+}
+
+.nav-link:hover,
+.nav-link.router-link-active {
+  color: var(--fawn-primary);
+  background: var(--fawn-primary-bg);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cart-entry {
+  color: var(--fawn-text);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--fawn-text);
+  font-size: 14px;
+  outline: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-btn {
+  text-decoration: none;
+  color: #fff;
+  background: var(--fawn-primary);
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  transition: opacity 0.2s;
+}
+
+.login-btn:hover {
+  opacity: 0.88;
+}
+
+/* ---------- 主区域与页脚 ---------- */
+.page-main {
+  flex: 1;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+.page-footer {
+  border-top: 1px solid var(--fawn-border);
+  padding: 18px 16px 26px;
+  text-align: center;
+  color: var(--fawn-text-sub);
+  font-size: 13px;
+}
+
+/* ---------- 通用 ---------- */
+.card {
+  background: var(--fawn-card);
+  border: 1px solid var(--fawn-border);
+  border-radius: var(--fawn-radius);
+  padding: 18px;
+}
+
+.price {
+  color: var(--fawn-primary);
+  font-weight: 700;
+}
+
+.price-symbol {
+  font-size: 0.75em;
+  margin-right: 1px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 22px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title::before {
+  content: '';
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--fawn-primary);
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .topbar-inner {
+    gap: 10px;
+    padding: 0 12px;
+  }
+  .brand-name {
+    display: none;
+  }
+  .nav-link {
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+  .page-main {
+    padding: 12px 12px 40px;
+  }
+}

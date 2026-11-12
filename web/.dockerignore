@@ -1,0 +1,5 @@
+# 体积与安全:构建上下文排除项
+node_modules
+dist
+.git
+.env

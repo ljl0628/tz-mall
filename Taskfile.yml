@@ -1,0 +1,121 @@
+# 小鹿童装 Fawn Mall — go-task 任务编排(https://taskfile.dev)
+# 常用任务速查:
+#   task dev          一键启动:基础设施 + 后端(:8080) + 前端(:5173)
+#   task infra        仅启动 MySQL / Redis / RabbitMQ 容器
+#   task server:dev   本地运行后端(热加载前请手动重启)
+#   task web:dev      本地运行前端 Vite 开发服务器
+#   task server:test  后端全量测试(需先 task infra)
+#   task web:build    前端类型检查 + 生产构建
+#   task up           构建并以容器方式启动全栈(前端 http://localhost:8090)
+#   task down         停止并移除所有容器
+version: "3"
+
+# 本机端口说明:宿主机 3306/6379/5672 可能被其他项目占用,
+# 本项目基础设施统一映射到 3316 / 6381 / 5673(见 docker-compose.yml),
+# 容器内部与 CI(GitHub Actions services)仍为标准端口。
+env:
+  TZ_MYSQL_PORT: "3316"
+  TZ_REDIS_ADDR: 127.0.0.1:6381
+  TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+
+tasks:
+  dev:
+    desc: 一键启动全部环境(基础设施 + 后端 + 前端)
+    cmds:
+      - task: infra
+      - task: start-server
+      - task: start-web
+
+  start-server:
+    internal: true
+    dir: server
+    cmds:
+      - cmd: go run ./cmd/server
+        env:
+          TZ_MYSQL_PORT: "3316"
+          TZ_REDIS_ADDR: 127.0.0.1:6381
+          TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+        background: true
+
+  start-web:
+    internal: true
+    dir: web
+    cmds:
+      - cmd: npm run dev
+        background: true
+
+  infra:
+    desc: 启动基础设施容器(MySQL/Redis/RabbitMQ)
+    cmds:
+      - docker compose up -d mysql redis rabbitmq
+      - cmd: docker compose ps --format "table {{.Name}}\t{{.Status}}"
+
+  server:dev:
+    desc: 本地运行后端服务(默认 :8080,自动使用本机映射端口)
+    dir: server
+    cmds:
+      - go run ./cmd/server
+    env:
+      TZ_MYSQL_PORT: "3316"
+      TZ_REDIS_ADDR: 127.0.0.1:6381
+      TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+
+  web:dev:
+    desc: 本地运行前端 Vite 开发服务器(默认 :5173,代理 /api 到 8080)
+    dir: web
+    cmds:
+      - npm run dev
+
+  server:test:
+    desc: 后端全量测试(依赖真实 MySQL/Redis/RabbitMQ,请先 task infra)
+    dir: server
+    cmds:
+      - go vet ./...
+      - test -z "$(gofmt -l .)"
+      - go test -p 1 -count=1 ./...
+    env:
+      TZ_MYSQL_PORT: "3316"
+      TZ_REDIS_ADDR: 127.0.0.1:6381
+      TZ_RABBITMQ_URL: amqp://fawn:fawn_dev_123@127.0.0.1:5673/
+
+  server:build:
+    desc: 编译后端二进制
+    dir: server
+    cmds:
+      - go build -o bin/fawn-server ./cmd/server
+
+  server:fmt:
+    desc: 格式化后端代码并检查
+    dir: server
+    cmds:
+      - gofmt -l -w .
+      - cmd: test -z "$(gofmt -l .)"
+        ignore_error: false
+
+  web:build:
+    desc: 前端类型检查 + 生产构建
+    dir: web
+    cmds:
+      - npm run typecheck
+      - npm run build
+
+  web:typecheck:
+    desc: 前端 TypeScript 类型检查(vue-tsc)
+    dir: web
+    cmds:
+      - npm run typecheck
+
+  up:
+    desc: 构建镜像并以容器方式启动全栈(前端 http://localhost:8090)
+    cmds:
+      - docker compose up -d --build
+
+  down:
+    desc: 停止并移除所有容器(数据卷保留)
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: 跟踪查看容器日志
+    cmds:
+      - docker compose logs -f --tail=100
