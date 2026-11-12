@@ -110,6 +110,19 @@ jobs:
     if: vars.DEPLOY_ENABLED != 'false'
     environment: production
     steps:
+      - name: 检出仓库(取最新编排文件)
+        uses: actions/checkout@v4
+      - name: 同步编排文件到服务器
+        # compose 结构变更(新增环境变量/服务/卷)随部署自动送达,
+        # 避免服务器副本滞后导致新配置静默不生效
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /opt/fawn-mall
+          overwrite: true
       - name: 登录 TCR 并拉取最新镜像重启
         uses: appleboy/ssh-action@v1
         with:
