@@ -1,0 +1,124 @@
+# ============================================================================
+# 小鹿童装 Fawn Mall — 生产环境编排
+# 与 docker-compose.yml(本地开发,源码构建)的区别:
+#   1. 前后端直接拉取 ghcr.io 镜像,不在服务器上构建;
+#   2. 基础设施端口只绑定 127.0.0.1,公网仅暴露 Web 入口(建议由宿主 Nginx + TLS 反代);
+#   3. 镜像 tag 经 TAG 环境变量固定,便于版本回滚(.env 中 TAG=sha-xxxxxxx 或 v1.2.3)。
+#
+# 服务器目录约定:/opt/fawn-mall(本文件 + .env)
+# 用法:
+#   cd /opt/fawn-mall
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+# 详细步骤见 DEPLOY.md。
+# ============================================================================
+name: fawn-mall
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: fawn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fawn_mall}
+      MYSQL_USER: ${MYSQL_USER:-fawn}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    # 仅本机回环可连,运维经 SSH 隧道访问,不对公网开放
+    ports:
+      - "127.0.0.1:3316:3306"
+    volumes:
+      - fawn-mysql-data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: fawn-redis
+    restart: unless-stopped
+    # 开启 AOF 持久化,重启后购物车/预扣库存不丢失
+    command: redis-server --appendonly yes --appendfsync everysec
+    ports:
+      - "127.0.0.1:6381:6379"
+    volumes:
+      - fawn-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: fawn-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-fawn}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}
+    ports:
+      # 管理控制台仅本机可访(SSH 隧道:ssh -L 15673:127.0.0.1:15673 user@host)
+      - "127.0.0.1:5673:5672"
+      - "127.0.0.1:15673:15672"
+    volumes:
+      - fawn-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # 后端:ghcr.io 镜像,静态二进制,非 root 运行(见 server/Dockerfile)
+  server:
+    image: ghcr.io/ljl0628/tz-mall/fawn-server:${TAG:-latest}
+    container_name: fawn-server
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod # 强校验:jwt.secret>=32 字节、密码非空
+      APP_SERVER_MODE: release
+      APP_JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET(>=32 字节)}
+      APP_DB_HOST: mysql
+      APP_DB_PORT: "3306"
+      APP_DB_USER: ${MYSQL_USER:-fawn}
+      APP_DB_PASSWORD: ${MYSQL_PASSWORD}
+      APP_DB_NAME: ${MYSQL_DATABASE:-fawn_mall}
+      APP_REDIS_ADDR: redis:6379
+      APP_RABBITMQ_URL: amqp://${RABBITMQ_USER:-fawn}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      APP_LOG_FORMAT: json # JSON 落文件(挂载持久化),stdout 安静
+    ports:
+      - "127.0.0.1:8080:8080" # 供宿主 Nginx 健康检查/直连调试,公网不可达
+    volumes:
+      - fawn-server-logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # 前端:Nginx 托管 SPA 并反代 /api → server(见 web/nginx.conf)
+  web:
+    image: ghcr.io/ljl0628/tz-mall/fawn-web:${TAG:-latest}
+    container_name: fawn-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:80" # 由宿主 Nginx 终结 TLS 后反代到此,或临时直接对外
+    depends_on:
+      - server
+
+volumes:
+  fawn-mysql-data:
+  fawn-redis-data:
+  fawn-rabbitmq-data:
+  fawn-server-logs:
