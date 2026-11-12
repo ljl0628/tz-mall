@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 商品管理:列表(搜索/筛选)、新增/编辑对话框(含 SKU 尺码库存)、上下架、删除、改库存。 */
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { adminApi, productApi } from '@/api'
 import { fen2yuan, SEASON_NAME } from '@/utils/format'
 import { toast } from '@/utils/notify'
@@ -47,6 +47,13 @@ const emptyForm = (): ProductInput => ({
 })
 
 const form = reactive<{ data: ProductInput }>({ data: emptyForm() })
+
+/** 价格编辑器以「元」为单位(两位小数),form.data.price 存库仍为分。
+ *  数据库存分是正确设计(避免浮点误差),但不该把内部单位暴露给操作者。 */
+const priceYuan = computed<number>({
+  get: () => form.data.price / 100,
+  set: v => { form.data.price = Math.round(v * 100) },
+})
 /** 编辑时后端返回的真实 SKU(用于直接改库存)。 */
 const editingSkus = ref<{ id: number; size: string; stock: number }[]>([])
 
@@ -86,10 +93,13 @@ async function load() {
   }
 }
 
-function openCreate() {
+async function openCreate() {
   editingId.value = null
   form.data = emptyForm()
   editingSkus.value = []
+  // 分类默认选中第一个:空值 0 没有对应选项,会被 el-select 原样显示成「0」
+  if (!categories.value.length) await loadCategories().catch(() => {})
+  form.data.category_id = categories.value[0]?.id ?? 0
   dialogVisible.value = true
 }
 
@@ -339,8 +349,8 @@ function onPageChange(p: number) {
           </el-form-item>
         </div>
         <div class="form-row">
-          <el-form-item label="价格(分)" required>
-            <el-input-number v-model="form.data.price" :min="100" :max="99990000" :step="500" />
+          <el-form-item label="价格(元)" required>
+            <el-input-number v-model="priceYuan" :min="0.01" :max="999900" :step="1" :precision="2" />
           </el-form-item>
           <el-form-item label="状态">
             <el-switch v-model="form.data.status" :active-value="1" :inactive-value="0" active-text="上架" inactive-text="下架" />
