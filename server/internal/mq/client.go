@@ -108,7 +108,15 @@ func (c *Client) Run(ctx context.Context) {
 			}(q, h)
 		}
 
-		// 等待连接或通道关闭(消费者随之退出),然后重连
+		// 消费者全部退出也视为连接异常(如 channel 级错误不触发 connClose),
+		// 主动断开重建,避免出现"连接存活但无人消费"的假活状态。
+		consumersDone := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(consumersDone)
+		}()
+
+		// 等待连接关闭或消费者全退,然后重连
 		connClose := c.conn.NotifyClose(make(chan *amqp.Error, 1))
 		select {
 		case <-ctx.Done():
@@ -119,6 +127,15 @@ func (c *Client) Run(ctx context.Context) {
 			logger.Warn(ctx, "RabbitMQ 连接断开,准备重连")
 			c.setHealthy(false)
 			wg.Wait()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(c.reconnectInterval):
+			}
+		case <-consumersDone:
+			logger.Warn(ctx, "RabbitMQ 消费者全部退出,强制重建连接")
+			c.setHealthy(false)
+			c.forceReconnect() // 关闭残留连接(NotifyClose 事件由缓冲通道吸收)
 			select {
 			case <-ctx.Done():
 				return
@@ -264,33 +281,41 @@ func (c *Client) forceReconnect() {
 
 // consume 单队列消费者:手动 ack;失败消息带 x-retry 计数重发,
 // 超过最大重试次数后转入 parking 队列并确认原消息,避免无限循环。
+// 每个消费者使用独立 channel:Qos 的 prefetch 作用在消费通道上,
+// 且避免多 goroutine 在共享 channel 上并发同步调用(Qos/Consume)
+// 导致 broker 收到交错帧返回 503 "unexpected command received"。
+// 通道断开即退出,由 Run 负责整体重建。
 func (c *Client) consume(ctx context.Context, queue string, h Handler) {
-	for {
-		c.mu.Lock()
-		ch := c.ch
-		c.mu.Unlock()
-		if ch == nil || ch.IsClosed() {
-			return // 连接已断,由 Run 负责重建
-		}
-		// Qos 必须在 Consume 之前设置,prefetch=1 保证逐条手动 ack
-		if err := ch.Qos(1, 0, false); err != nil {
-			logger.Error(ctx, "MQ 设置 Qos 失败", zap.String("queue", queue), zap.Error(err))
-			return
-		}
-		deliveries, err := ch.Consume(queue, "", false, false, false, false, nil)
-		if err != nil {
-			logger.Error(ctx, "MQ 消费启动失败", zap.String("queue", queue), zap.Error(err))
-			return
-		}
-		logger.Info(ctx, "MQ 消费者启动", zap.String("queue", queue))
-
-		for d := range deliveries {
-			c.handleMessage(ctx, ch, queue, d, h)
-		}
-		// deliveries 关闭:连接断开,退出由 Run 重启
-		logger.Warn(ctx, "MQ 消费通道关闭", zap.String("queue", queue))
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
 		return
 	}
+	ch, err := conn.Channel()
+	if err != nil {
+		logger.Error(ctx, "MQ 创建消费通道失败", zap.String("queue", queue), zap.Error(err))
+		return
+	}
+	// Qos 必须在 Consume 之前设置,prefetch=1 保证逐条手动 ack
+	if err := ch.Qos(1, 0, false); err != nil {
+		logger.Error(ctx, "MQ 设置 Qos 失败", zap.String("queue", queue), zap.Error(err))
+		_ = ch.Close()
+		return
+	}
+	deliveries, err := ch.Consume(queue, "", false, false, false, false, nil)
+	if err != nil {
+		logger.Error(ctx, "MQ 消费启动失败", zap.String("queue", queue), zap.Error(err))
+		_ = ch.Close()
+		return
+	}
+	logger.Info(ctx, "MQ 消费者启动", zap.String("queue", queue))
+
+	for d := range deliveries {
+		c.handleMessage(ctx, ch, queue, d, h)
+	}
+	// deliveries 关闭:连接断开,退出由 Run 重启
+	logger.Warn(ctx, "MQ 消费通道关闭", zap.String("queue", queue))
 }
 
 // handleMessage 单条消息的分发与应答;ctx 来自消费者 goroutine(Run 的生命周期)。

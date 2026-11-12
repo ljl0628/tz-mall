@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 订单详情:状态、时间轴(P1)、商品明细、收货信息、操作(支付/取消/确认收货)。 */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { orderApi } from '@/api'
 import { fen2yuan, ORDER_STATUS_NAME, ORDER_STATUS_TAG, formatTime } from '@/utils/format'
@@ -22,6 +22,13 @@ onMounted(async () => {
   await load()
   // 若订单刚下单还在 MQ 处理中,轮询直到落库
   if (!order.value) pollTimer = setTimeout(pollUntilCreated, 1200)
+})
+
+// 卸载时必须停掉轮询链:离开路由后 route.params.orderNo 变为 undefined,
+// 残留定时器会以 /orders/undefined 无限打接口
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
 })
 
 async function pollUntilCreated() {
