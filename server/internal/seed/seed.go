@@ -36,8 +36,15 @@ type seedProduct struct {
 	Description string
 	Price       int64 // 分
 	Recommended int8
+	Image       string // 七牛 CDN 商品图;留空则回退 picsum 占位图
 	Sizes       []seedSKU
 }
+
+// imageCDNBase 种子商品图所在 CDN 目录(图源 Pexels,免授权可商用)。
+const imageCDNBase = "https://static.ljl0628.cn/products/20261112/"
+
+// cdnImage 按七牛上传返回的文件哈希拼出完整 CDN URL。
+func cdnImage(hash string) string { return imageCDNBase + hash + ".jpg" }
 
 var categories = []model.Category{
 	{Name: "连体衣", Sort: 1},
