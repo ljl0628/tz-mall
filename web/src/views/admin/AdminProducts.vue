@@ -546,6 +546,23 @@ function onPageChange(p: number) {
   flex: 1;
 }
 
+/* 窄屏(全局已把弹窗压到 92vw):并排字段竖排、图片上传区上下排、SKU 行允许换行 */
+@media (max-width: 768px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .img-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sku-row {
+    flex-wrap: wrap;
+  }
+}
+
 .sku-editor {
   width: 100%;
 }

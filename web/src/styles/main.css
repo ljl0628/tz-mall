@@ -233,6 +233,59 @@ body {
   }
 }
 
+/* ---------- 弹窗移动端适配 ---------- */
+/* 4 个业务 el-dialog 桌面写死像素宽(420~640px),窄屏会横向溢出、底部按钮被裁出屏幕;
+   ElMessageBox 固定 420px、级联面板三列各 180px 同样溢出。
+   统一策略:≤768px 弹窗近全宽 + 限高,body 内部滚动,footer 恒可见。
+   (width prop 经 --el-dialog-width 内联注入,须用 !important 覆盖 width 本身) */
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 92vw !important;
+    max-width: 92vw;
+    margin: 4vh auto 0; /* EP 默认 15vh 顶距,窄屏留更多可视高度 */
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .el-dialog__body {
+    flex: 1;
+    min-height: 0; /* flex 子项允许收缩,内部滚动的前提 */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .el-dialog__footer {
+    flex-shrink: 0;
+  }
+  .el-message-box {
+    width: auto;
+    max-width: 92vw;
+  }
+  /* 退款确认等文案含 22 位订单号,无断行点,防止撑破 */
+  .el-message-box__message p {
+    overflow-wrap: anywhere;
+  }
+  /* 级联面板(省/市/区)三列各 min-width 180px,收窄为均分列。
+     panel 自身也要限宽,否则它按内容(max-content)撑开,dropdown 的 max-width 拦不住;
+     popper 定位是在限宽生效前按内容宽算的(偏右会出屏),窄屏统一钉在屏幕左侧与弹窗对齐 */
+  .el-cascader__dropdown,
+  .el-cascader-panel {
+    max-width: 92vw;
+  }
+  .el-cascader__dropdown {
+    left: 4vw !important;
+  }
+  .el-cascader-panel .el-cascader-menu {
+    min-width: 0;
+    flex: 1 1 0;
+    max-height: 42vh; /* 限高后走内部滚动,避免省份 34 项把面板顶出屏幕底部 */
+  }
+  /* 省份名列最长(如「新疆维吾尔自治区」),第一列加权减少省名截断;
+     二三列是市/区名,普遍 2-4 字,窄些无碍 */
+  .el-cascader-panel .el-cascader-menu:first-child {
+    flex: 1.6 1 0;
+  }
+}
+
 /* ---------- 移动端抽屉导航 ---------- */
 .nav-drawer .el-drawer__body {
   padding: 0;
