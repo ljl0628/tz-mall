@@ -26,8 +26,21 @@ const current = computed<Address | null>(() => {
   return addresses.value.find(a => a.is_default) ?? addresses.value[0] ?? null
 })
 
+/** 清理勾选中的失效商品(已下架/无货):自动取消勾选并同步服务端,
+ * 避免结算页看不到商品、提交却被后端整体驳回「已下架」。返回清理数量。 */
+async function dropInvalidSelected(): Promise<number> {
+  const invalid = cartStore.items.filter(i => i.selected && (i.off_shelf || i.stock <= 0))
+  for (const it of invalid) {
+    await cartStore.toggleSelected(it, false)
+  }
+  return invalid.length
+}
+
 onMounted(async () => {
-  if (!cartStore.loaded) cartStore.fetch().catch(() => {})
+  // 结算页强制刷新购物车实时状态(价格/库存/上下架)
+  await cartStore.fetch().catch(() => {})
+  const removed = await dropInvalidSelected()
+  if (removed > 0) toast(`已自动移除 ${removed} 件失效商品(下架/无货)`, 'warning')
   try {
     addresses.value = await addressApi.list()
   } catch {
@@ -45,6 +58,12 @@ function maskPhone(phone: string): string {
 }
 
 async function submit() {
+  // 提交前再清一次失效商品(页面停留期间被下架的竞态)
+  const removed = await dropInvalidSelected()
+  if (removed > 0) {
+    toast(`已自动移除 ${removed} 件失效商品,请确认清单后重新提交`, 'warning')
+    return
+  }
   if (items.value.length === 0) {
     toast('请先在购物车勾选商品', 'warning')
     return
