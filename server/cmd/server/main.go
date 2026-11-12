@@ -83,13 +83,14 @@ func main() {
 	blackRepo := repository.NewBlacklist(rdb)
 
 	jwtMgr := jwtx.New(cfg.JWT.Secret, cfg.JWT.ExpireHours)
+	userState := repository.NewUserState(rdb, jwtMgr.ExpireDuration())
 	mqClient := mq.New(cfg.RabbitMQ.URL, cfg.Order.PayTimeoutSeconds, cfg.Order.MaxRetry)
 
 	authSvc := service.NewAuthService(userRepo, blackRepo, jwtMgr)
 	productSvc := service.NewProductService(productRepo, categoryRepo, cacheRepo)
 	cartSvc := service.NewCartService(cartRepo, productRepo, cacheRepo)
 	orderSvc := service.NewOrderService(orderRepo, cartRepo, productRepo, stockRepo, mqClient)
-	adminSvc := service.NewAdminService(productRepo, categoryRepo, orderRepo, cacheRepo, stockRepo)
+	adminSvc := service.NewAdminService(productRepo, categoryRepo, orderRepo, cacheRepo, stockRepo, userRepo, userState)
 
 	// 5. MQ 消费者注册 + 后台运行(自动重连)
 	mqClient.RegisterHandler(mq.QueueOrderCreate, orderSvc.HandleOrderCreate)
@@ -104,6 +105,7 @@ func main() {
 		Cfg:     cfg,
 		JWT:     jwtMgr,
 		Black:   blackRepo,
+		Guard:   userState,
 		Auth:    handler.NewAuthHandler(authSvc),
 		Product: handler.NewProductHandler(productSvc),
 		Cart:    handler.NewCartHandler(cartSvc),

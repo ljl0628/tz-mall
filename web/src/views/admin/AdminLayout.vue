@@ -26,6 +26,7 @@ const menus = [
   { path: '/admin/products', label: '商品管理' },
   { path: '/admin/categories', label: '分类管理' },
   { path: '/admin/orders', label: '订单管理' },
+  { path: '/admin/users', label: '用户管理' },
 ]
 </script>
 

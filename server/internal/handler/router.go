@@ -13,6 +13,7 @@ type RouterDeps struct {
 	Cfg   *config.Config
 	JWT   *jwtx.Manager
 	Black middleware.TokenBlacklist
+	Guard middleware.UserGuard
 
 	Auth    *AuthHandler
 	Product *ProductHandler
@@ -47,7 +48,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 	api.GET("/products/:id", d.Product.Detail)
 
 	// 登录用户接口
-	user := api.Group("", middleware.JWTAuth(d.JWT, d.Black))
+	user := api.Group("", middleware.JWTAuth(d.JWT, d.Black, d.Guard))
 	{
 		user.POST("/auth/logout", d.Auth.Logout)
 		user.GET("/user/me", d.Auth.Me)
@@ -67,7 +68,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 	}
 
 	// 管理端接口(管理员角色)
-	admin := api.Group("/admin", middleware.JWTAuth(d.JWT, d.Black), middleware.AdminRequired())
+	admin := api.Group("/admin", middleware.JWTAuth(d.JWT, d.Black, d.Guard), middleware.AdminRequired())
 	{
 		admin.GET("/me", d.Admin.Me)
 		admin.GET("/products", d.Admin.ListProducts)
@@ -83,6 +84,11 @@ func NewRouter(d RouterDeps) *gin.Engine {
 
 		admin.GET("/orders", d.Admin.ListOrders)
 		admin.PUT("/orders/:orderNo/ship", d.Admin.Ship)
+
+		admin.GET("/users", d.Admin.ListUsers)
+		admin.PUT("/users/:id/status", d.Admin.SetUserStatus)
+		admin.PUT("/users/:id/role", d.Admin.SetUserRole)
+		admin.PUT("/users/:id/password", d.Admin.ResetUserPassword)
 	}
 
 	return r

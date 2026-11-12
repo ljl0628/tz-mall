@@ -5,7 +5,15 @@ export interface User {
   username: string
   nickname: string
   role: 'user' | 'admin'
+  status: 0 | 1 // 1 正常 0 已禁用
   created_at: string
+}
+
+export interface UserPage {
+  list: User[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface Category {

@@ -8,19 +8,23 @@ import (
 	"fawn-mall/pkg/resp"
 )
 
-// AdminService 管理端业务:商品/分类增删改查、库存管理、订单查看与发货。
+// AdminService 管理端业务:商品/分类增删改查、库存管理、订单查看与发货、用户管理。
 type AdminService struct {
 	products   *repository.ProductRepo
 	categories *repository.CategoryRepo
 	orders     *repository.OrderRepo
 	cache      *repository.Cache
 	stock      *repository.CacheStock
+	users      *repository.UserRepo
+	ustate     *repository.UserState
 }
 
 // NewAdminService 构造。
 func NewAdminService(p *repository.ProductRepo, c *repository.CategoryRepo,
-	o *repository.OrderRepo, cache *repository.Cache, stock *repository.CacheStock) *AdminService {
-	return &AdminService{products: p, categories: c, orders: o, cache: cache, stock: stock}
+	o *repository.OrderRepo, cache *repository.Cache, stock *repository.CacheStock,
+	users *repository.UserRepo, ustate *repository.UserState) *AdminService {
+	return &AdminService{products: p, categories: c, orders: o, cache: cache, stock: stock,
+		users: users, ustate: ustate}
 }
 
 // SKUInput 商品 SKU 入参。

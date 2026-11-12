@@ -60,8 +60,8 @@ type ctxKey string
 
 const userClaimsKey ctxKey = "user_claims"
 
-// JWTAuth 鉴权中间件:解析 Bearer token → 校验黑名单 → 注入用户信息。
-func JWTAuth(jm *jwtx.Manager, bl TokenBlacklist) gin.HandlerFunc {
+// JWTAuth 鉴权中间件:解析 Bearer token → 校验黑名单 → 校验用户级守卫 → 注入用户信息。
+func JWTAuth(jm *jwtx.Manager, bl TokenBlacklist, ug UserGuard) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		var token string
@@ -82,6 +82,17 @@ func JWTAuth(jm *jwtx.Manager, bl TokenBlacklist) gin.HandlerFunc {
 			if blocked, err := bl.IsBlocked(c.Request.Context(), token); err == nil && blocked {
 				abortUnauthorized(c, "登录已失效,请重新登录")
 				return
+			}
+		}
+		// 用户级守卫:管理员封禁 / 调整角色后,对已签发 token 即时生效。
+		// Redis 异常时放行并回退 token 内声明(与黑名单一致的降级策略)。
+		if ug != nil {
+			if disabled, err := ug.IsDisabled(c.Request.Context(), claims.UserID); err == nil && disabled {
+				abortUnauthorized(c, "账号已被禁用,请联系管理员")
+				return
+			}
+			if role, err := ug.RoleOverride(c.Request.Context(), claims.UserID); err == nil && role != "" {
+				claims.Role = role
 			}
 		}
 		c.Set(string(userClaimsKey), claims)
@@ -106,6 +117,14 @@ func AdminRequired() gin.HandlerFunc {
 // TokenBlacklist token 黑名单查询接口(由 repository.Blacklist 实现)。
 type TokenBlacklist interface {
 	IsBlocked(ctx context.Context, token string) (bool, error)
+}
+
+// UserGuard 用户级状态守卫(由 repository.UserState 实现):
+// 管理员封禁用户 / 调整角色后,已签发的 JWT 无法撤销,
+// 借助 Redis 覆盖值让这些操作对存量 token 即时生效。
+type UserGuard interface {
+	IsDisabled(ctx context.Context, userID uint64) (bool, error)
+	RoleOverride(ctx context.Context, userID uint64) (string, error) // 无覆盖返回 ""
 }
 
 func abortUnauthorized(c *gin.Context, msg string) {

@@ -29,6 +29,9 @@ const (
 	CodeCategoryDuplicated = 60010 // 分类已存在
 	CodeSelfDelete         = 60011 // 管理员不能删除自己
 	CodeAdminExists        = 60012 // 管理员账号已存在
+	CodeUserDisabled       = 60013 // 账号已被禁用
+	CodeUserNotFound       = 60014 // 用户不存在
+	CodeSelfOp             = 60015 // 不能对自己执行该操作
 )
 
 // Body 统一响应体。
@@ -61,6 +64,9 @@ var (
 	ErrCartItem        = &BizError{CodeCartItemNotFound, "购物车中不存在该商品"}
 	ErrCategory        = &BizError{CodeCategoryNotFound, "分类不存在"}
 	ErrCategoryDup     = &BizError{CodeCategoryDuplicated, "分类名称已存在"}
+	ErrUserDisabled    = &BizError{CodeUserDisabled, "账号已被禁用,请联系管理员"}
+	ErrUserNotFound    = &BizError{CodeUserNotFound, "用户不存在"}
+	ErrSelfOp          = &BizError{CodeSelfOp, "不能对自己执行该操作"}
 )
 
 // OK 输出成功响应。

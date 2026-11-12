@@ -10,6 +10,7 @@ import type {
   ProductInput,
   ProductPage,
   User,
+  UserPage,
 } from '@/types'
 
 // ---- 认证 ----
@@ -112,4 +113,18 @@ export const adminApi = {
     return http.get<OrderPage>(`/admin/orders?${p.toString()}`)
   },
   ship: (orderNo: string) => http.put<{ shipped: boolean }>(`/admin/orders/${orderNo}/ship`),
+
+  listUsers: (q: { page?: number; page_size?: number; keyword?: string; role?: string; status?: number | string }) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+    })
+    return http.get<UserPage>(`/admin/users?${p.toString()}`)
+  },
+  setUserStatus: (id: number, status: 0 | 1) =>
+    http.put<{ updated: boolean }>(`/admin/users/${id}/status`, { status }),
+  setUserRole: (id: number, role: 'user' | 'admin') =>
+    http.put<{ updated: boolean }>(`/admin/users/${id}/role`, { role }),
+  resetUserPassword: (id: number, password: string) =>
+    http.put<{ reset: boolean }>(`/admin/users/${id}/password`, { password }),
 }

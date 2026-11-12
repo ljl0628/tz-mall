@@ -30,6 +30,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'products', name: 'admin-products', component: () => import('@/views/admin/AdminProducts.vue'), meta: { title: '商品管理' } },
       { path: 'categories', name: 'admin-categories', component: () => import('@/views/admin/AdminCategories.vue'), meta: { title: '分类管理' } },
       { path: 'orders', name: 'admin-orders', component: () => import('@/views/admin/AdminOrders.vue'), meta: { title: '订单管理' } },
+      { path: 'users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { title: '用户管理' } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },

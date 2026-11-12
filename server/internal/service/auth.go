@@ -83,6 +83,10 @@ func (s *AuthService) Login(ctx context.Context, req LoginReq) (*LoginResp, erro
 	if u == nil || !password.Verify(u.PasswordHash, req.Password) {
 		return nil, resp.ErrLoginFailed
 	}
+	// 被管理员封禁的账号拒绝登录(存量 token 由中间件经 UserState 拦截)
+	if u.Status == model.UserStatusDisabled {
+		return nil, resp.ErrUserDisabled
+	}
 	token, err := s.jwt.Generate(u.ID, u.Role, u.Username)
 	if err != nil {
 		return nil, err

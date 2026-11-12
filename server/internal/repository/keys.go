@@ -11,6 +11,8 @@ const (
 	keyPDPrefix    = "pd"    // fawn:pd:{productID} → 商品详情 JSON
 	keyHome        = "home"  // fawn:home → 首页聚合 JSON
 	keyBlkPrefix   = "blk"   // fawn:blk:{tokenSHA256} → 登出黑名单
+	keyUdisPrefix  = "udis"  // fawn:udis:{userID} → 用户禁用标记(管理员封禁,即时生效)
+	keyUrolePrefix = "urole" // fawn:urole:{userID} → 角色覆盖值(管理员调整角色,即时生效)
 )
 
 // StockKey 预扣库存 key。
@@ -36,4 +38,14 @@ func HomeKey() string {
 // BlkKey token 黑名单 key。
 func BlkKey(tokenSHA string) string {
 	return fmt.Sprintf("%s:%s:%s", keyPrefix, keyBlkPrefix, tokenSHA)
+}
+
+// UserDisabledKey 用户禁用标记 key。
+func UserDisabledKey(userID uint64) string {
+	return fmt.Sprintf("%s:%s:%d", keyPrefix, keyUdisPrefix, userID)
+}
+
+// RoleOverrideKey 角色覆盖 key。
+func RoleOverrideKey(userID uint64) string {
+	return fmt.Sprintf("%s:%s:%d", keyPrefix, keyUrolePrefix, userID)
 }
