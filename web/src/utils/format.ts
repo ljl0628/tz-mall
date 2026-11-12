@@ -26,6 +26,7 @@ export const ORDER_STATUS_NAME: Record<OrderStatus, string> = {
   shipped: '已发货',
   completed: '已完成',
   canceled: '已取消',
+  refunded: '已退款',
 }
 
 export const ORDER_STATUS_TAG: Record<OrderStatus, 'warning' | 'primary' | 'success' | 'info' | 'danger'> = {
@@ -34,6 +35,30 @@ export const ORDER_STATUS_TAG: Record<OrderStatus, 'warning' | 'primary' | 'succ
   shipped: 'success',
   completed: 'success',
   canceled: 'danger',
+  refunded: 'warning',
+}
+
+/** 财务中心:流水方向/业务类型/售后单状态。 */
+export const FLOW_DIRECTION_NAME: Record<number, string> = {
+  1: '进账',
+  2: '出账',
+}
+
+export const FLOW_BIZ_NAME: Record<string, string> = {
+  pay: '支付',
+  refund: '退款',
+}
+
+export const REFUND_STATUS_NAME: Record<string, string> = {
+  pending: '待处理',
+  refunded: '已退款',
+  rejected: '已拒绝',
+}
+
+export const REFUND_STATUS_TAG: Record<string, 'warning' | 'success' | 'info'> = {
+  pending: 'warning',
+  refunded: 'success',
+  rejected: 'info',
 }
 
 export const SEASON_NAME: Record<string, string> = {

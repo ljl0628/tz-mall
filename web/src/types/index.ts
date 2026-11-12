@@ -101,6 +101,7 @@ export type OrderStatus =
   | 'shipped'
   | 'completed'
   | 'canceled'
+  | 'refunded'
 
 export interface OrderItem {
   product_id: number
@@ -126,10 +127,119 @@ export interface Order {
   finish_time: string | null
   cancel_time: string | null
   cancel_reason: string
+  refund_time: string | null
   created_at: string
   items?: OrderItem[]
   /** 待支付订单剩余支付秒数(服务端计算;其余状态无此字段) */
   pay_remaining_seconds?: number
+}
+
+// ---- 财务中心 ----
+
+/** 资金流水方向:1=进账(支付) 2=出账(退款)。 */
+export type FlowDirection = 1 | 2
+
+/** 资金流水(账本,只增不改)。 */
+export interface PayFlow {
+  flow_no: string
+  order_no: string
+  user_id: number
+  direction: FlowDirection
+  biz_type: 'pay' | 'refund'
+  amount: number
+  status: string
+  remark: string
+  created_at: string
+}
+
+export type RefundStatus = 'pending' | 'refunded' | 'rejected'
+
+/** 退款售后单。 */
+export interface RefundOrder {
+  refund_no: string
+  order_no: string
+  user_id: number
+  amount: number
+  reason: string
+  status: RefundStatus
+  operator_id: number
+  created_at: string
+  processed_at: string | null
+}
+
+/** 日结账单。 */
+export interface DailyStatement {
+  stat_date: string
+  pay_amount: number
+  refund_amount: number
+  net_amount: number
+  pay_count: number
+  refund_count: number
+  updated_at: string
+}
+
+/** 经营看板指标(金额单位:分)。 */
+export interface FinanceDashboard {
+  today_pay: number
+  today_refund: number
+  month_net: number
+  pending_refunds: number
+}
+
+/** 趋势图单日点位(金额单位:分)。 */
+export interface TrendPoint {
+  date: string
+  pay_amount: number
+  refund_amount: number
+  net_amount: number
+}
+
+/** 对账单侧结果。 */
+export interface ReconcileSide {
+  order_total: number
+  flow_total: number
+  diff: number
+  order_count: number
+  flow_count: number
+}
+
+/** 对账差异明细。 */
+export interface ReconcileMismatch {
+  order_no: string
+  order_amount: number
+  flow_amount: number
+  reason: string
+}
+
+/** 一键对账结果。 */
+export interface ReconcileResult {
+  balanced: boolean
+  pay_side: ReconcileSide
+  refund_side: ReconcileSide
+  mismatches?: ReconcileMismatch[]
+  generated_at: string
+}
+
+/** 分页包装(财务)。 */
+export interface FlowPage {
+  list: PayFlow[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface RefundPage {
+  list: RefundOrder[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface StatementPage {
+  list: DailyStatement[]
+  total: number
+  page: number
+  page_size: number
 }
 
 /** 收货地址簿条目。 */

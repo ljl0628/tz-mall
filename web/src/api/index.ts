@@ -4,6 +4,8 @@ import type {
   Address,
   CartView,
   Category,
+  FinanceDashboard,
+  FlowPage,
   HomePayload,
   Order,
   OrderPage,
@@ -11,6 +13,11 @@ import type {
   ProductDetail,
   ProductInput,
   ProductPage,
+  ReconcileResult,
+  RefundOrder,
+  RefundPage,
+  StatementPage,
+  TrendPoint,
   User,
   UserPage,
 } from '@/types'
@@ -154,4 +161,55 @@ export const adminApi = {
     http.put<{ updated: boolean }>(`/admin/users/${id}/role`, { role }),
   resetUserPassword: (id: number, password: string) =>
     http.put<{ reset: boolean }>(`/admin/users/${id}/password`, { password }),
+}
+
+// ---- 财务中心(管理员) ----
+export const financeApi = {
+  dashboard: () => http.get<FinanceDashboard>('/admin/finance/dashboard'),
+  trend: (days = 7) => http.get<TrendPoint[]>(`/admin/finance/trend?days=${days}`),
+  listFlows: (q: {
+    page?: number
+    page_size?: number
+    start_date?: string
+    end_date?: string
+    order_no?: string
+    flow_no?: string
+    direction?: number
+  }) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+    })
+    return http.get<FlowPage>(`/admin/finance/flows?${p.toString()}`)
+  },
+  listRefunds: (q: { page?: number; page_size?: number; status?: string }) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+    })
+    return http.get<RefundPage>(`/admin/finance/refunds?${p.toString()}`)
+  },
+  /** 管理员对已支付订单直接发起退款 */
+  adminRefund: (body: { order_no: string; reason: string }) =>
+    http.post<RefundOrder>('/admin/finance/refunds', body),
+  /** 处理用户退款申请:approve=true 通过(执行退款),false 拒绝 */
+  processRefund: (refundNo: string, approve: boolean) =>
+    http.post<{ refund_no: string }>(`/admin/finance/refunds/${encodeURIComponent(refundNo)}/process`, { approve }),
+  reconcile: () => http.post<ReconcileResult>('/admin/finance/reconcile'),
+  listStatements: (q: { page?: number; page_size?: number }) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) p.set(k, String(v))
+    })
+    return http.get<StatementPage>(`/admin/finance/statements?${p.toString()}`)
+  },
+  /** 手动日结:date 缺省昨天;days>1 回填最近 N 天 */
+  runStatements: (body: { date?: string; days?: number }) =>
+    http.post<{ done_days: number }>('/admin/finance/statements/run', body),
+}
+
+// ---- 用户侧退款申请 ----
+export const refundApi = {
+  apply: (orderNo: string, reason: string) =>
+    http.post<{ message: string }>(`/orders/${encodeURIComponent(orderNo)}/refund-apply`, { reason }),
 }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-/** 订单管理:全量订单列表(状态筛选)+ 发货操作。 */
+/** 订单管理:全量订单列表(状态筛选)+ 发货/退款操作。 */
 import { ref, onMounted } from 'vue'
-import { adminApi } from '@/api'
+import { ElMessageBox } from 'element-plus'
+import { adminApi, financeApi } from '@/api'
 import { fen2yuan, ORDER_STATUS_NAME, ORDER_STATUS_TAG, formatTime } from '@/utils/format'
 import { toast } from '@/utils/notify'
 import type { Order, OrderStatus } from '@/types'
@@ -12,6 +13,7 @@ const tabs: { key: string; label: string }[] = [
   { key: 'paid', label: '待发货' },
   { key: 'shipped', label: '已发货' },
   { key: 'completed', label: '已完成' },
+  { key: 'refunded', label: '已退款' },
   { key: 'canceled', label: '已取消' },
 ]
 
@@ -22,6 +24,7 @@ const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
 const shipping = ref('')
+const refunding = ref('')
 
 onMounted(load)
 
@@ -54,6 +57,29 @@ async function ship(o: Order) {
     load()
   } finally {
     shipping.value = ''
+  }
+}
+
+/** 对已支付订单退款:后端事务内条件更新(paid→refunded),重复/状态异常返回冲突错误。 */
+async function refund(o: Order) {
+  const { value } = await ElMessageBox.prompt(
+    `订单 ${o.order_no},金额 ¥${fen2yuan(o.pay_amount)}。整单全额退款(模拟),库存回补。`,
+    '退款原因',
+    {
+      confirmButtonText: '确认退款',
+      cancelButtonText: '取消',
+      inputPlaceholder: '请输入退款原因(2-200 字)',
+      inputValidator: (v: string) => (v && v.trim().length >= 2 ? true : '退款原因至少 2 字'),
+      type: 'warning',
+    },
+  )
+  refunding.value = o.order_no
+  try {
+    const r = await financeApi.adminRefund({ order_no: o.order_no, reason: value.trim() })
+    toast(`退款成功:${r.refund_no}`)
+    load()
+  } finally {
+    refunding.value = ''
   }
 }
 
@@ -108,17 +134,16 @@ function onPageChange(p: number) {
       <el-table-column label="下单时间" width="170">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
-          <el-button
-            v-if="row.status === 'paid'"
-            size="small"
-            type="primary"
-            :loading="shipping === row.order_no"
-            @click="ship(row)"
-          >
-            发货
-          </el-button>
+          <template v-if="row.status === 'paid'">
+            <el-button size="small" type="primary" :loading="shipping === row.order_no" @click="ship(row)">
+              发货
+            </el-button>
+            <el-button size="small" type="warning" :loading="refunding === row.order_no" @click="refund(row)">
+              退款
+            </el-button>
+          </template>
           <span v-else class="no-op">-</span>
         </template>
       </el-table-column>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-/** 订单详情:状态、时间轴(P1)、商品明细、收货信息、操作(支付/取消/确认收货)。 */
+/** 订单详情:状态、时间轴(P1)、商品明细、收货信息、操作(支付/取消/申请退款/确认收货)。 */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { orderApi } from '@/api'
+import { ElMessageBox } from 'element-plus'
+import { orderApi, refundApi } from '@/api'
 import { fen2yuan, ORDER_STATUS_NAME, ORDER_STATUS_TAG, formatTime } from '@/utils/format'
 import { toast } from '@/utils/notify'
 import PayCountdown from '@/components/PayCountdown.vue'
@@ -57,6 +58,7 @@ const timeline = computed(() => {
     { label: '支付成功', time: o.pay_time },
     { label: '商家发货', time: o.ship_time },
     { label: '交易完成', time: o.finish_time },
+    { label: '退款成功', time: o.refund_time },
   ]
   if (o.status === 'canceled') {
     return [
@@ -92,6 +94,29 @@ async function confirm() {
   try {
     order.value = await orderApi.confirm(orderNo.value)
     toast('确认收货,交易完成')
+  } finally {
+    acting.value = false
+  }
+}
+
+/** 已支付订单申请退款:提交后由管理员在后台审核,订单保持已支付。 */
+async function applyRefund() {
+  const { value } = await ElMessageBox.prompt(
+    '申请后由管理员审核,审核通过将全额退款(模拟)并回补库存。',
+    '申请退款',
+    {
+      confirmButtonText: '提交申请',
+      cancelButtonText: '取消',
+      inputPlaceholder: '请填写退款原因(2-200 字)',
+      inputValidator: (v: string) => (v && v.trim().length >= 2 ? true : '退款原因至少 2 字'),
+      type: 'warning',
+    },
+  )
+  acting.value = true
+  try {
+    await refundApi.apply(orderNo.value, value.trim())
+    toast('退款申请已提交,请等待管理员处理')
+    await load()
   } finally {
     acting.value = false
   }
@@ -174,7 +199,21 @@ async function onExpired() {
 
       <!-- 操作条 -->
       <div class="card act-bar">
-        <el-button v-if="order.status === 'pending_payment'" @click="router.push('/orders')">返回列表</el-button>
+        <el-button
+          v-if="order.status === 'pending_payment' || order.status === 'refunded'"
+          @click="router.push('/orders')"
+        >
+          返回列表
+        </el-button>
+        <el-button
+          v-if="order.status === 'paid'"
+          type="warning"
+          plain
+          :loading="acting"
+          @click="applyRefund"
+        >
+          申请退款
+        </el-button>
         <el-button
           v-if="order.status === 'pending_payment'"
           type="danger"

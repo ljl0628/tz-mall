@@ -12,6 +12,7 @@ const tabs: { key: string; label: string }[] = [
   { key: 'paid', label: '已支付' },
   { key: 'shipped', label: '已发货' },
   { key: 'completed', label: '已完成' },
+  { key: 'refunded', label: '已退款' },
   { key: 'canceled', label: '已取消' },
 ]
 
