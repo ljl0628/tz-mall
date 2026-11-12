@@ -68,19 +68,18 @@ push main / 打 tag v*.*.*
 
 ### 3.1 配置 CI/CD(仓库侧,先做,否则下次 push CD 会失败)
 
-仓库 **Settings → Secrets and variables → Actions**:
+仓库 **Settings → Secrets and variables → Actions → Secrets**(镜像仓库地址与命名空间为非敏感项,
+已直接固化在 `.github/workflows/cd.yml` 顶部 `env`,不依赖仓库 Variables):
 
 | 类型 | 名称 | 值 |
 | --- | --- | --- |
-| Variable | `TCR_REGISTRY` | 如 `ccr.ccs.tencentyun.com` 或 `<实例名>-tcr.tencentcloudcr.com` |
-| Variable | `TCR_NAMESPACE` | TCR 命名空间(小写) |
-| Variable | `DEPLOY_ENABLED` | `true`(启用自动部署;不配则只构建推送) |
 | Secret | `TCR_USERNAME` | TCR 访问凭证用户名 |
 | Secret | `TCR_PASSWORD` | TCR 访问凭证密码(长期) |
 | Secret | `SSH_HOST` | 服务器公网 IP |
 | Secret | `SSH_USER` | 登录用户(如 `ubuntu` / `root`) |
 | Secret | `SSH_KEY` | 私钥**全文**(对应服务器已装的公钥;CVM 绑定密钥对即可) |
 
+> 自动部署默认开启;仓库 Variable `DEPLOY_ENABLED=false` 可整体停用(只构建推送)。
 > 生产发布想加人工确认:Settings → Environments → `production` → Required reviewers。
 
 ### 3.2 初始化服务器
@@ -198,7 +197,7 @@ docker logs blog-nginx --tail 20                        # 无证书/DNS 报错
 
 | 变量 | 说明 | 生产要求 |
 | --- | --- | --- |
-| `REGISTRY` / `NAMESPACE` | TCR 地址与命名空间 | 与 CI Variables 一致 |
+| `REGISTRY` / `NAMESPACE` | TCR 地址与命名空间 | 与 cd.yml 顶部 env 固定值一致 |
 | `TAG` | 镜像版本 | `main` / `v1.2.3` / `sha-xxxxxxx` |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | 腾讯云 MySQL 内网地址/端口/库名 | 同 VPC 内网直连 |
 | `DB_USER` / `DB_PASSWORD` | 数据库账号 | **建议专用账号仅授权 fawn_mall 库**,密码随机 ≥24 位 |

@@ -1,16 +1,18 @@
 # CD:main 分支推送或 v* 标签时,构建前后端镜像推送到【腾讯云镜像仓库 TCR】,
 # 并可选自动 SSH 部署到腾讯云服务器。
 #
-# ── 需先在仓库 Settings → Secrets and variables → Actions 配置 ──
-# Variables(非敏感):
-#   TCR_REGISTRY   镜像仓库域名,如 ccr.ccs.tencentyun.com(个人版)
-#                  或 <实例名>-tcr.tencentcloudcr.com(企业版)
-#   TCR_NAMESPACE  TCR 内的命名空间(建议小写)
-#   DEPLOY_ENABLED true 时启用自动部署(不配置则只构建推送)
-# Secrets(敏感):
+# ── 镜像仓库地址(非敏感)直接固化在下方 env,不走仓库 Variables ──
+#   TCR_REGISTRY  个人版 ccr.ccs.tencentyun.com;企业版 <实例名>-tcr.tencentcloudcr.com
+#   TCR_NAMESPACE TCR 命名空间(小写),须与服务器 /opt/fawn-mall/.env 一致
+#
+# ── 需在仓库 Settings → Secrets and variables → Actions → Secrets 配置 ──
 #   TCR_USERNAME / TCR_PASSWORD   TCR 访问凭证(企业版:控制台「访问凭证」
 #                                  新建长期凭证;个人版注意临时密码时效)
 #   SSH_HOST / SSH_USER / SSH_KEY 腾讯云服务器地址 / 登录用户 / 私钥全文
+#
+# 自动部署开关:默认开启;仓库 Variable DEPLOY_ENABLED=false 可整体停用
+# (只构建推送、不碰服务器)。生产发布想加人工确认:
+# Settings → Environments → production → Required reviewers。
 #
 # 镜像 tag 规则(docker/metadata-action):
 #   main 分支推送 → :main + :sha-xxxxxxx
@@ -22,6 +24,10 @@ on:
   push:
     branches: [main]
     tags: ['v*.*.*']
+
+env:
+  TCR_REGISTRY: ccr.ccs.tencentyun.com
+  TCR_NAMESPACE: fawn_mall
 
 jobs:
   build-server:
@@ -35,14 +41,14 @@ jobs:
       - name: 登录腾讯云镜像仓库
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.TCR_REGISTRY }}
+          registry: ${{ env.TCR_REGISTRY }}
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.TCR_REGISTRY }}/${{ vars.TCR_NAMESPACE }}/fawn-server
+          images: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/fawn-server
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -70,14 +76,14 @@ jobs:
       - name: 登录腾讯云镜像仓库
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.TCR_REGISTRY }}
+          registry: ${{ env.TCR_REGISTRY }}
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.TCR_REGISTRY }}/${{ vars.TCR_NAMESPACE }}/fawn-web
+          images: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/fawn-web
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -95,13 +101,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   # 自动部署:构建推送成功后 SSH 到腾讯云服务器拉取并重启。
-  # 开关:仓库 Variable DEPLOY_ENABLED=true;可在 Settings → Environments →
-  # production 配置 Required reviewers 增加人工确认。
+  # 默认开启;仓库 Variable DEPLOY_ENABLED=false 可停用;可在 Settings →
+  # Environments → production 配置 Required reviewers 增加人工确认。
   deploy:
     name: SSH 自动部署到腾讯云(按 DEPLOY_ENABLED 开关)
     runs-on: ubuntu-latest
     needs: [build-server, build-web]
-    if: vars.DEPLOY_ENABLED == 'true'
+    if: vars.DEPLOY_ENABLED != 'false'
     environment: production
     steps:
       - name: 登录 TCR 并拉取最新镜像重启
@@ -113,7 +119,7 @@ jobs:
           script: |
             set -e
             cd /opt/fawn-mall
-            echo '${{ secrets.TCR_PASSWORD }}' | docker login ${{ vars.TCR_REGISTRY }} -u '${{ secrets.TCR_USERNAME }}' --password-stdin
+            echo '${{ secrets.TCR_PASSWORD }}' | docker login ${{ env.TCR_REGISTRY }} -u '${{ secrets.TCR_USERNAME }}' --password-stdin
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
