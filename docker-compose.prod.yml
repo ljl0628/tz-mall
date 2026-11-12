@@ -7,6 +7,11 @@
 #      个人版 REGISTRY=ccr.ccs.tencentyun.com;企业版为 <实例名>-tcr.tencentcloudcr.com;
 #      CVM 与 TCR 同地域时走内网拉取(免公网流量费)。
 #
+# 多项目共存:所有宿主机端口均参数化且默认高位(13306/16379/25672/18080/18090),
+# 不与常见服务冲突;与其他项目同机运行时,若个别端口仍相撞,在 .env 里覆盖
+# MYSQL_PORT / REDIS_PORT / MQ_MGMT_PORT / SERVER_PORT / WEB_PORT 即可。
+# 80/443 由宿主机上【已有的】Nginx 统一承载(新增 server 虚拟主机,按域名分流)。
+#
 # 服务器目录约定:/opt/fawn-mall(本文件 + .env)
 # 用法:
 #   cd /opt/fawn-mall
@@ -28,9 +33,9 @@ services:
       MYSQL_USER: ${MYSQL_USER:-fawn}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
       TZ: Asia/Shanghai
-    # 仅本机回环可连,运维经 SSH 隧道访问,不对公网开放
+    # 仅本机回环可连,运维经 SSH 隧道访问,不对公网开放;端口可经 .env 覆盖避让其他项目
     ports:
-      - "127.0.0.1:3316:3306"
+      - "127.0.0.1:${MYSQL_PORT:-13306}:3306"
     volumes:
       - fawn-mysql-data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
@@ -47,7 +52,7 @@ services:
     # 开启 AOF 持久化,重启后购物车/预扣库存不丢失
     command: redis-server --appendonly yes --appendfsync everysec
     ports:
-      - "127.0.0.1:6381:6379"
+      - "127.0.0.1:${REDIS_PORT:-16379}:6379"
     volumes:
       - fawn-redis-data:/data
     healthcheck:
@@ -64,9 +69,9 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-fawn}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}
     ports:
-      # 管理控制台仅本机可访(SSH 隧道:ssh -L 15673:127.0.0.1:15673 user@host)
-      - "127.0.0.1:5673:5672"
-      - "127.0.0.1:15673:15672"
+      # 只发布管理控制台且仅本机可访(SSH 隧道:ssh -L 25672:127.0.0.1:25672 user@host);
+      # AMQP 5672 不出容器网络(应用走 compose 内部服务名访问),减少端口占用
+      - "127.0.0.1:${MQ_MGMT_PORT:-25672}:15672"
     volumes:
       - fawn-rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -93,7 +98,7 @@ services:
       APP_RABBITMQ_URL: amqp://${RABBITMQ_USER:-fawn}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       APP_LOG_FORMAT: json # JSON 落文件(挂载持久化),stdout 安静
     ports:
-      - "127.0.0.1:8080:8080" # 供宿主 Nginx 健康检查/直连调试,公网不可达
+      - "127.0.0.1:${SERVER_PORT:-18080}:8080" # 健康检查/直连调试,公网不可达
     volumes:
       - fawn-server-logs:/app/logs
     depends_on:
@@ -116,7 +121,7 @@ services:
     container_name: fawn-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8090:80" # 由宿主 Nginx 终结 TLS 后反代到此,或临时直接对外
+      - "127.0.0.1:${WEB_PORT:-18090}:80" # 宿主 Nginx 终结 TLS 后反代到此
     depends_on:
       - server
 

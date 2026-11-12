@@ -2,6 +2,10 @@
 
 > 形态:**GitHub Actions(CI/CD)→ 腾讯云镜像仓库 TCR → SSH 自动部署到腾讯云服务器(CVM/轻量)**。
 > 服务器只做 `pull + up`,不在服务器上构建。前置条件:腾讯云服务器与镜像仓库已就绪。
+>
+> **多项目共存**:方案按「服务器上已有其他项目」设计 —— 本项目不独占任何公网端口,
+> 80/443 复用宿主机上**已有的** Nginx(新增一个虚拟主机按域名分流),本项目全部端口
+> 只绑 127.0.0.1 且默认高位(13306/16379/25672/18080/18090),可在 .env 逐个覆盖避让。
 
 ## 1. 架构与产物链路
 
@@ -16,12 +20,13 @@ push main / 打 tag v*.*.*
 └────────────────────────────────┘    tag: main / sha-xxxxxxx / v1.2.3 / latest
         │  DEPLOY_ENABLED=true 时自动 SSH(默认关,防止误发布)
         ▼
-┌── 腾讯云服务器(Docker)────────────────────────────────────┐
-│ 宿主 Nginx(80/443,TLS 终结,certbot 自动续期)           │
-│   └─ / → 127.0.0.1:8090  web 容器(SPA + /api 同源反代)  │
-│ Docker 网络:web → server → mysql/redis/rabbitmq           │
-│ 基础设施端口仅绑定 127.0.0.1(3316/6381/5673/15673)       │
-│ 数据卷:mysql / redis / rabbitmq / server-logs            │
+┌── 腾讯云服务器(Docker,与其他项目共存)───────────────────┐
+│ 宿主 Nginx(80/443,已有实例,多域名虚拟主机分流)        │
+│   ├─ other.example.com → 已有项目                          │
+│   └─ mall.example.com  → 127.0.0.1:18090(本项目 web)     │
+│ Docker 网络 fawn-mall:web → server → mysql/redis/rabbitmq  │
+│ 本项目端口仅 127.0.0.1:13306/16379/25672/18080/18090      │
+│ 数据卷:mysql / redis / rabbitmq / server-logs(独立命名) │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -36,10 +41,11 @@ push main / 打 tag v*.*.*
 
 | 项 | 要求 |
 | --- | --- |
-| 机型 | CVM 或轻量应用服务器;最低 2C2G(演示),推荐 2C4G + 40GB 云盘 |
+| 机型 | CVM 或轻量应用服务器;本项目额外占用约 **1GB 内存**(MySQL+RabbitMQ+Redis+前后端),已有项目同机时建议合计 ≥4G 或加 swap |
 | 系统 | Ubuntu 22.04 / Debian 12(CVM);轻量可选「Docker 应用镜像」 |
-| 软件 | Docker Engine ≥ 24(含 `docker compose` v2 插件)、nginx、certbot |
-| 安全组 | 公网入站仅 **22 / 80 / 443**;3306/6379/5672/8080/8090 不得放行 |
+| 软件 | Docker Engine ≥ 24(含 `docker compose` v2 插件);宿主 Nginx + certbot(**若已有项目占 80/443,直接复用它的 Nginx,不要重复安装**) |
+| 安全组 | 公网入站仅 **22 / 80 / 443**(与其他项目共用即可);本项目所有端口只绑 127.0.0.1,无需新增放行 |
+| 磁盘 | 本项目镜像 + 数据 + 日志约 5-8GB,预留 15GB 以上 |
 | TCR | 已建命名空间(建议小写);**与服务器同地域**(走内网拉取免公网流量费) |
 
 **TCR 凭证(CI/CD 必须长期有效)**:
@@ -91,6 +97,12 @@ cat >> .env <<'EOF'
 REGISTRY=ccr.ccs.tencentyun.com      # 换成你的 TCR 域名
 NAMESPACE=<你的命名空间>
 TAG=main                              # 自动跟随主干;固定版本用 v1.2.3 / sha-xxxxxxx
+# 与同机其他项目端口相撞时,取消注释并改端口:
+# SERVER_PORT=18080                   # 后端 healthz 直连口(127.0.0.1)
+# WEB_PORT=18090                      # 前端入口,宿主 Nginx 反代到此(127.0.0.1)
+# MYSQL_PORT=13306                    # MySQL 调试口(SSH 隧道用,127.0.0.1)
+# REDIS_PORT=16379
+# MQ_MGMT_PORT=25672                  # RabbitMQ 管理台(SSH 隧道用,127.0.0.1)
 EOF
 
 # TCR 私有镜像:服务器登录一次(凭证会存入 ~/.docker/config.json)
@@ -105,15 +117,45 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml ps            # 五个容器 Up(healthy)
 
-curl -s http://127.0.0.1:8080/healthz                   # {"status":"ok"}
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/   # 200
+curl -s http://127.0.0.1:18080/healthz                  # {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/   # 200
 docker exec fawn-server tail -5 /app/logs/fawn-mall.log # JSON 日志正常写入
+docker ps --format '{{.Names}}\t{{.Status}}' | sort     # 与其他项目容器互不影响
 ```
 
-浏览器访问 `http://<公网IP>:8090` 需临时在安全组放行 8090,**验证后立即关闭**,
-改走 443(§3.4)。`admin / admin123` 登录后立刻修改密码。
+对外访问统一走域名 + 443(§3.4);`admin / admin123` 登录后立刻修改密码。
 
-### 3.4 HTTPS(上线必做)
+### 3.4 HTTPS:在【已有】Nginx 上新增虚拟主机(不新装、不重启其他站点)
+
+服务器上的 Nginx 大概率已在为其他项目服务 —— 只需**追加**一个 server 块,
+按域名(server_name)分流,互不影响:
+
+```bash
+sudo tee /etc/nginx/sites-available/fawn-mall <<'EOF'
+server {
+    listen 80;
+    server_name mall.example.com;              # 本项目域名,解析到本机公网 IP
+    location / {
+        proxy_pass http://127.0.0.1:18090;     # 本项目 web 容器(SPA + /api 同源反代)
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+sudo ln -sf /etc/nginx/sites-available/fawn-mall /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx    # reload 不断连接,其他站点无感
+sudo certbot --nginx -d mall.example.com        # 自动改写 443 + 定时续期
+```
+
+两种特殊情况:
+
+- **已有项目用非标准目录结构**(如所有站点写在 nginx.conf 里):把上面 server 块
+  追加到对应 http {} 内即可,效果等同;
+- **已有项目的 Nginx 跑在 Docker 里**占了 80/443:不要另起宿主 Nginx(端口必撞)。
+  把本项目的 server 块挂进那个容器的配置挂载目录;或者临时方案 —— 安全组放行
+  18090 并在 compose 中把 web 改为 `0.0.0.0:18090:80` 直接裸跑(尽快补 TLS)。
 
 ```bash
 sudo tee /etc/nginx/sites-available/fawn-mall <<'EOF'
@@ -165,9 +207,14 @@ sudo certbot --nginx -d mall.example.com    # 自动配置 443 + 定时续期
 | --- | --- | --- |
 | `REGISTRY` / `NAMESPACE` | TCR 地址与命名空间 | 与 CI Variables 一致 |
 | `TAG` | 镜像版本 | `main` / `v1.2.3` / `sha-xxxxxxx` |
+| `SERVER_PORT` / `WEB_PORT` / `MYSQL_PORT` / `REDIS_PORT` / `MQ_MGMT_PORT` | 本机端口覆盖(默认 18080/18090/13306/16379/25672) | 仅与其他项目相撞时改 |
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | 数据库口令 | 随机 ≥24 位 |
 | `RABBITMQ_PASSWORD` | MQ 口令 | 随机 ≥24 位 |
 | `JWT_SECRET` | 登录态签名密钥 | 随机 ≥32 字节(启动硬校验) |
+
+**与其他项目的隔离**:本项目独立 compose project(`fawn-mall`)、独立 Docker 网络、
+独立数据卷、容器名前缀 `fawn-`;CD 的 `up -d --remove-orphans` 只作用于
+`/opt/fawn-mall` 目录,不会触碰同机其他项目的容器与网络。
 
 应用参数(支付超时、连接池、日志保留等)如需调整:在 `server/config/config.example.yaml`
 基础上建 `config.yaml` 挂载进容器,或追加 `APP_*` 环境变量(优先级最高)。
@@ -210,10 +257,11 @@ RabbitMQ/Redis 数据可重建(队列拓扑、缓存由服务启动重建),一�
 | --- | --- |
 | CD build job 失败 | Actions 日志;多为 TCR 登录失败(密码过期/凭证无权限/Variable 未配置) |
 | CD deploy job 失败 | 安全组 22 未放行、SSH_KEY 与服务器密钥对不匹配、服务器磁盘满 |
+| 端口被同机其他项目占用 | `docker compose -f docker-compose.prod.yml ps` 后 `ss -lntp | grep 18090` 找占用者,在 .env 覆盖对应 *_PORT 再 `up -d` |
 | server 反复重启 | `docker logs fawn-server`:配置校验失败会 zap fatal 指明字段(JWT_SECRET 过短、.env 缺项) |
-| 前端 502 | `docker ps` 看 web/server 是否健康;`curl 127.0.0.1:8080/healthz`;宿主 Nginx `error.log` |
+| 前端 502 | `docker ps` 看 web/server 是否健康;`curl 127.0.0.1:18080/healthz`;宿主 Nginx `error.log`;域名解析与已有项目的 server_name 是否冲突 |
 | 登录 50001 | 查 fawn-server 日志 error 级:DB/Redis/MQ 连接失败带 op+stack |
-| MQ 队列堆积 | `ssh -L 15673:127.0.0.1:15673 user@host` 后浏览器开 http://localhost:15673 |
+| MQ 队列堆积 | `ssh -L 25672:127.0.0.1:25672 user@host` 后浏览器开 http://localhost:25672 |
 | 数据库连不上 | `.env` 口令与 MySQL 容器首次初始化不一致:改 .env 不会同步改库;需进容器改密或重置数据卷(慎用,丢数据) |
 | 升级后起不来 | 回滚 TAG(§4);仍失败看 `docker logs` fatal 信息 |
 
