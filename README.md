@@ -8,7 +8,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Go 1.23 · Gin · GORM · golang-jwt/v5 · go-redis/v9 · amqp091-go |
+| 后端 | Go 1.23 · Gin · GORM · golang-jwt/v5 · go-redis/v9 · amqp091-go · **viper(配置)· zap(日志)** |
 | 前端 | Vue 3(`<script setup>` 组合式 API)· TypeScript · Vite · Pinia · Vue Router · Element Plus(**原生 fetch 封装,未用 axios**) |
 | 存储 | MySQL 8(业务数据)· Redis 7(商品缓存 / 购物车 / 登录态 / 库存预扣) |
 | 消息 | RabbitMQ 3.13(订单异步落库 + 延迟取消,confirm + manual ack + 重试) |
@@ -63,8 +63,9 @@ tz-mall/
 │   ├── ci.yml                # 后端(真实三件套服务容器)+ 前端 CI
 │   └── cd.yml                # 镜像构建推送 ghcr.io + 可选 SSH 部署
 ├── server/                   # Go 后端
-│   ├── cmd/server/main.go    # 入口:配置→迁移→种子→MQ→HTTP→优雅退出
+│   ├── cmd/server/main.go    # 入口:配置→日志→迁移→种子→MQ→HTTP→优雅退出
 │   ├── config/config.example.yaml # 配置示例(真实 config.yaml 不入库,APP_* 环境变量覆盖)
+│   ├── pkg/                  # 基础库:config(viper)/ logger(zap+热级别)/ apperr / resp / jwtx
 │   └── internal/
 │       ├── handler/          # 路由 + 参数绑定校验 + 统一响应
 │       ├── service/          # 业务逻辑(下单/支付/取消/金额计算...)
@@ -208,6 +209,40 @@ JWT 无状态,签发后无法撤销——管理员封禁某用户后,其手中�
   管理端封禁 / 角色调整另用 `fawn:udis:{uid}` / `fawn:urole:{uid}` 覆盖键,
   对已签发的存量 token 即时生效(见「用户管理」一节)。
 - 购物车:Redis Hash,field 为 `{productID}:{size}` —— 同款不同尺码是两个条目。
+
+### 5. 配置与日志(viper + zap)
+
+**配置(`server/pkg/config`)**:强类型 Config(server/db/redis/rabbitmq/jwt/log/order 分组),
+viper 封装在包内,业务代码禁止 import viper、禁止临时 `viper.GetString`。
+
+- 加载优先级(高 → 低):`APP_*` 环境变量 > `config.{env}.yaml` > `config.yaml` > 内置默认值;
+  层级键映射为下划线环境变量(`db.password → APP_DB_PASSWORD`);
+- 多环境:`APP_ENV=dev/test/prod`(默认 dev,非法值拒绝启动),非 dev 叠加 `config.{env}.yaml`;
+- 启动强校验(失败即 zap Fatal 退出,错误指明字段路径,如
+  `jwt.secret: prod 环境长度必须 >= 32 字节`):端口范围、池正数、时长正数、
+  密钥非空;prod 额外要求 jwt.secret ≥ 32 字节 —— 不做静默兜底;
+- 仓库只提交 `config.example.yaml`,真实 `config.yaml` 在 .gitignore;
+  容器内示例配置作兜底,密钥经 compose 环境变量注入;
+- **热加载仅 `log.level`** 一项(`viper.WatchConfig`):改配置文件即时生效,
+  其余配置需重启,避免运行中状态漂移。
+
+**日志(`server/pkg/logger`,zap + lumberjack)**:业务代码统一走
+`logger.Info/Warn/Error(ctx, msg, zap.Field...)` 封装,禁止自建 logger 实例。
+
+- 环境:dev = 彩色 console 上屏 + 同步写文件;prod = JSON 只写文件
+  (容器挂载 `fawn-server-logs` 卷至 `/app/logs`,stdout 保持安静);
+- 文件按大小切割(默认 100MB)、按天保留(14 天、10 份)、gzip 压缩;
+- 每条日志携带 `service` / `env`;请求链路自动附加 `request_id`(RequestID 中间件
+  生成/透传 `X-Request-Id` 并回带响应头)与 `user_id`(JWTAuth 注入);
+- 访问日志(AccessLog)按状态码分级:5xx → error、4xx → warn、其余 → info;
+- 错误分级(`pkg/apperr`):业务错误(可预期,warn + 业务码,如库存不足)与
+  系统错误(基础设施异常,error + op + 底层错误 + 调用栈)在 `resp.Fail` 统一分流,
+  客户端一律只收到业务码,不泄露内部细节;
+- 脱敏:手机号 `138****5678`、token 仅留前 6 位,启动配置打印对密码/URL 同样脱敏;
+- panic 由 Recovery 中间件兜底:记录 panic 值 + 完整调用栈,返回统一 50001,
+  进程不退出(debug 模式可用 `GET /debug/panic` 验收);
+- 优雅关停(SIGTERM):按 `server.shutdown_timeout` 预算依次关 HTTP → MQ → Redis →
+  MySQL,最后 `logger.Sync()` 刷盘退出。
 
 ## API 一览(前缀 `/api/v1`)
 
