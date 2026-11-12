@@ -1,11 +1,13 @@
 /** API 模块:按领域拆分的接口封装。 */
 import { http, httpUpload } from './request'
 import type {
+  Address,
   CartView,
   Category,
   HomePayload,
   Order,
   OrderPage,
+  PlaceOrderBody,
   ProductDetail,
   ProductInput,
   ProductPage,
@@ -64,7 +66,7 @@ export const cartApi = {
 
 // ---- 订单 ----
 export const orderApi = {
-  place: (body: { receiver: string; phone: string; address: string; remark?: string }) =>
+  place: (body: PlaceOrderBody) =>
     http.post<{ order_no: string; total_amount: number }>('/orders', body),
   list: (q: { page?: number; page_size?: number; status?: string }) => {
     const p = new URLSearchParams()
@@ -77,6 +79,25 @@ export const orderApi = {
   pay: (orderNo: string) => http.post<Order>(`/orders/${orderNo}/pay`),
   cancel: (orderNo: string) => http.post<Order>(`/orders/${orderNo}/cancel`),
   confirm: (orderNo: string) => http.post<Order>(`/orders/${orderNo}/confirm`),
+}
+
+// ---- 收货地址簿 ----
+export interface AddressInput {
+  receiver: string
+  phone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  is_default?: boolean
+}
+
+export const addressApi = {
+  list: () => http.get<Address[]>('/user/addresses'),
+  create: (body: AddressInput) => http.post<Address>('/user/addresses', body),
+  update: (id: number, body: AddressInput) => http.put<Address>(`/user/addresses/${id}`, body),
+  remove: (id: number) => http.delete<{ deleted: boolean }>(`/user/addresses/${id}`),
+  setDefault: (id: number) => http.put<{ updated: boolean }>(`/user/addresses/${id}/default`),
 }
 
 // ---- 管理端 ----

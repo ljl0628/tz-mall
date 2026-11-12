@@ -19,6 +19,7 @@ type RouterDeps struct {
 	Product *ProductHandler
 	Cart    *CartHandler
 	Order   *OrderHandler
+	Address *AddressHandler
 	Admin   *AdminHandler
 }
 
@@ -74,6 +75,13 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		user.POST("/orders/:orderNo/pay", d.Order.Pay)
 		user.POST("/orders/:orderNo/cancel", d.Order.Cancel)
 		user.POST("/orders/:orderNo/confirm", d.Order.Confirm)
+
+		// 收货地址簿(仅本人数据)
+		user.GET("/user/addresses", d.Address.List)
+		user.POST("/user/addresses", d.Address.Create)
+		user.PUT("/user/addresses/:id", d.Address.Update)
+		user.PUT("/user/addresses/:id/default", d.Address.SetDefault)
+		user.DELETE("/user/addresses/:id", d.Address.Delete)
 	}
 
 	// 管理端接口(管理员角色)

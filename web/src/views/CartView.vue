@@ -79,6 +79,7 @@ function goCheckout() {
         <div class="cart-list">
           <div v-for="(item, idx) in cartStore.items" :key="`${item.product_id}:${item.size}`" class="cart-item">
             <el-checkbox
+              class="ci-check"
               :model-value="item.selected"
               :disabled="item.off_shelf"
               @change="toggleOne(idx)"
@@ -93,17 +94,20 @@ function goCheckout() {
                 <span v-else-if="item.stock <= 0" class="ci-off">无货</span>
               </div>
             </div>
-            <div class="ci-price price">¥{{ fen2yuan(item.price) }}</div>
-            <el-input-number
-              :model-value="item.quantity"
-              :min="1"
-              :max="Math.max(item.stock, 1)"
-              size="small"
-              :disabled="item.off_shelf"
-              @change="(v: number | undefined) => changeQty(item, v)"
-            />
-            <div class="ci-sub">¥{{ fen2yuan(item.price * item.quantity) }}</div>
-            <el-button text type="danger" @click="removeItem(item)">删除</el-button>
+            <!-- 操作区:桌面右侧横排;移动端整行落到卡片底部,避免逐项乱序换行 -->
+            <div class="ci-ops">
+              <span class="ci-price price">¥{{ fen2yuan(item.price) }}</span>
+              <el-input-number
+                :model-value="item.quantity"
+                :min="1"
+                :max="Math.max(item.stock, 1)"
+                size="small"
+                :disabled="item.off_shelf"
+                @change="(v: number | undefined) => changeQty(item, v)"
+              />
+              <span class="ci-sub">¥{{ fen2yuan(item.price * item.quantity) }}</span>
+              <el-button text type="danger" @click="removeItem(item)">删除</el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -167,6 +171,19 @@ function goCheckout() {
 
 .cart-item:last-child {
   border-bottom: none;
+}
+
+.ci-check {
+  flex-shrink: 0;
+}
+
+/* 操作区:桌面整组靠右;移动端占满一整行落到卡片底部 */
+.ci-ops {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .ci-img {
@@ -268,8 +285,18 @@ function goCheckout() {
 }
 
 @media (max-width: 640px) {
+  /* 移动端两行布局:勾选+图+信息一行,价格/步进器/小计/删除整组落底,
+     短商品名不再导致子项逐个乱序换行 */
   .cart-item {
     flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .ci-ops {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+    gap: 8px;
+    padding-left: 26px; /* 与图片左侧对齐(勾选框宽) */
   }
   .ci-price,
   .ci-sub {

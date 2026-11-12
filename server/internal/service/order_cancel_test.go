@@ -26,7 +26,7 @@ func setupOrderSvc(t *testing.T) (*OrderService, *repository.OrderRepo, *reposit
 	products := repository.NewProductRepo(db)
 	cart := repository.NewCartRepo(rdb)
 	stock := repository.NewCacheStock(rdb)
-	return NewOrderService(orders, cart, products, stock, stubPublisher{}), orders, stock
+	return NewOrderService(orders, cart, products, stock, stubPublisher{}, 15*time.Minute), orders, stock
 }
 
 // TestCancelIfUnpaid_TimeoutCancelAndRefund 核心链路:

@@ -37,6 +37,8 @@ const (
 	CodeImageUpload        = 60014 // 图片上传失败(存储未配置/类型/大小不符)
 	CodeUserNotFound       = 60014 // 用户不存在
 	CodeSelfOp             = 60015 // 不能对自己执行该操作
+	CodeAddressNotFound    = 60016 // 收货地址不存在
+	CodeAddressLimit       = 60017 // 收货地址数量达到上限
 )
 
 // Body 统一响应体。

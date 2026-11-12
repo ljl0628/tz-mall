@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -27,11 +28,12 @@ const (
 
 // OrderService 订单业务:下单(Redis 预扣 + MQ 异步落库)、支付、取消、查询。
 type OrderService struct {
-	orders   *repository.OrderRepo
-	cart     *repository.CartRepo
-	products *repository.ProductRepo
-	stock    *repository.CacheStock
-	pub      Publisher
+	orders     *repository.OrderRepo
+	cart       *repository.CartRepo
+	products   *repository.ProductRepo
+	stock      *repository.CacheStock
+	pub        Publisher
+	payTimeout time.Duration // 待支付超时(与延迟取消队列同源),用于前端倒计时
 }
 
 // Publisher MQ 发布抽象(便于单测与解耦,实现方为 *mq.Client)。
@@ -39,10 +41,10 @@ type Publisher interface {
 	Publish(ctx context.Context, queue string, v any) error
 }
 
-// NewOrderService 构造。
+// NewOrderService 构造。payTimeout 为待支付自动取消时长(与 MQ 延迟队列共用配置)。
 func NewOrderService(o *repository.OrderRepo, cart *repository.CartRepo,
-	p *repository.ProductRepo, stock *repository.CacheStock, pub Publisher) *OrderService {
-	return &OrderService{orders: o, cart: cart, products: p, stock: stock, pub: pub}
+	p *repository.ProductRepo, stock *repository.CacheStock, pub Publisher, payTimeout time.Duration) *OrderService {
+	return &OrderService{orders: o, cart: cart, products: p, stock: stock, pub: pub, payTimeout: payTimeout}
 }
 
 // ---------- 金额计算(纯函数,含单测) ----------
@@ -79,11 +81,20 @@ func CalcOrderAmount(items []model.OrderItem) (int64, error) {
 // ---------- 下单 ----------
 
 // PlaceReq 下单请求(收货信息,商品取自购物车勾选项)。
+// 省市区结构化校验后组合为一条地址快照存入订单。
 type PlaceReq struct {
 	Receiver string `json:"receiver" binding:"required,min=2,max=32"`
 	Phone    string `json:"phone" binding:"required,len=11,numeric"`
-	Address  string `json:"address" binding:"required,min=2,max=255"`
+	Province string `json:"province" binding:"required,min=2,max=32"`
+	City     string `json:"city" binding:"required,min=2,max=32"`
+	District string `json:"district" binding:"required,min=2,max=32"`
+	Detail   string `json:"detail" binding:"required,min=2,max=200"`
 	Remark   string `json:"remark" binding:"max=200"`
+}
+
+// ComposeAddress 组合省市区 + 详细地址为订单地址快照。
+func (r PlaceReq) ComposeAddress() string {
+	return strings.Join([]string{r.Province, r.City, r.District, r.Detail}, " ")
 }
 
 // PlaceResp 下单响应。
@@ -144,6 +155,12 @@ func (s *OrderService) Place(ctx context.Context, userID uint64, req PlaceReq) (
 		return nil, resp.NewBiz(resp.CodeParamError, err.Error())
 	}
 
+	// 地址快照组合校验(各段上限之和可能超过订单列宽,超长提前拦截)
+	address := req.ComposeAddress()
+	if len([]rune(address)) > 255 {
+		return nil, resp.NewBiz(resp.CodeParamError, "收货地址过长,请精简详细地址")
+	}
+
 	// Redis Lua 原子预扣库存
 	if err := s.stock.DeductBatch(ctx, stockItems, func(it repository.StockItem) string {
 		name := nameOf[fmt.Sprintf("%d:%s", it.ProductID, it.Size)]
@@ -155,7 +172,7 @@ func (s *OrderService) Place(ctx context.Context, userID uint64, req PlaceReq) (
 	orderNo := GenOrderNo()
 	msg := mq.OrderCreateMsg{
 		OrderNo: orderNo, UserID: userID,
-		Receiver: req.Receiver, Phone: req.Phone, Address: req.Address, Remark: req.Remark,
+		Receiver: req.Receiver, Phone: req.Phone, Address: address, Remark: req.Remark,
 		Items: toMsgItems(items), TotalAmount: total, CreatedAt: time.Now(),
 	}
 	if err := s.pub.Publish(ctx, mq.QueueOrderCreate, msg); err != nil {
@@ -320,12 +337,35 @@ func (s *OrderService) List(ctx context.Context, userID uint64, status string, p
 	if err != nil {
 		return nil, err
 	}
+	// 待支付订单填充剩余支付秒数(前端倒计时展示)
+	now := time.Now()
+	for i := range list {
+		fillPayRemaining(&list[i], now, s.payTimeout)
+	}
 	return &PageList{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 // Detail 订单详情(校验归属)。
 func (s *OrderService) Detail(ctx context.Context, userID uint64, orderNo string) (*model.Order, error) {
-	return s.getOwnedOrder(orderNo, userID, true)
+	order, err := s.getOwnedOrder(orderNo, userID, true)
+	if err != nil {
+		return nil, err
+	}
+	fillPayRemaining(order, time.Now(), s.payTimeout)
+	return order, nil
+}
+
+// fillPayRemaining 待支付订单填充剩余支付秒数(服务端单点计算,
+// 前端只做倒计时渲染;超时未取消返回 0,由延迟队列兜底取消)。
+func fillPayRemaining(o *model.Order, now time.Time, payTimeout time.Duration) {
+	if o.Status != model.OrderStatusPendingPayment {
+		return
+	}
+	rem := int(o.CreatedAt.Add(payTimeout).Sub(now).Seconds())
+	if rem < 0 {
+		rem = 0
+	}
+	o.PayRemainingSeconds = rem
 }
 
 func (s *OrderService) getOwnedOrder(orderNo string, userID uint64, withItems bool) (*model.Order, error) {

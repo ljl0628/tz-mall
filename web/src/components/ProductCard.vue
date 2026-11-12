@@ -1,10 +1,11 @@
 <script setup lang="ts">
-/** 商品卡片:图、名称、价格、年龄段/季节标签,点击进入详情。 */
+/** 商品卡片:图、名称、价格、年龄段/季节标签,点击进入详情。
+ * 可选 rank(热销榜名次角标)/ sold(已售件数,优先于分类名展示)。 */
 import { RouterLink } from 'vue-router'
 import type { Product } from '@/types'
 import { fen2yuan, AGE_GROUP_SHORT, SEASON_NAME } from '@/utils/format'
 
-defineProps<{ product: Product }>()
+defineProps<{ product: Product; rank?: number; sold?: number }>()
 </script>
 
 <template>
@@ -12,6 +13,7 @@ defineProps<{ product: Product }>()
     <div class="pcard-img">
       <img :src="product.image" :alt="product.name" loading="lazy" />
       <span class="pcard-age">{{ AGE_GROUP_SHORT[product.age_group] }}</span>
+      <span v-if="rank" class="pcard-rank" :class="{ top: rank <= 3 }">{{ rank }}</span>
     </div>
     <div class="pcard-body">
       <p class="pcard-name">{{ product.name }}</p>
@@ -23,7 +25,8 @@ defineProps<{ product: Product }>()
         <span class="price">
           <span class="price-symbol">¥</span>{{ fen2yuan(product.price) }}
         </span>
-        <span class="pcard-cat" v-if="product.category_name">{{ product.category_name }}</span>
+        <span class="pcard-sold" v-if="sold && sold > 0">已售 {{ sold }}</span>
+        <span class="pcard-cat" v-else-if="product.category_name">{{ product.category_name }}</span>
       </div>
     </div>
   </RouterLink>
@@ -71,6 +74,27 @@ defineProps<{ product: Product }>()
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 999px;
+}
+
+/* 热销榜名次角标:前三名主色,其余深色半透明 */
+.pcard-rank {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  min-width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(61, 47, 40, 0.6);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  border-radius: 8px;
+}
+
+.pcard-rank.top {
+  background: var(--fawn-primary);
 }
 
 .pcard-body {
@@ -125,7 +149,8 @@ defineProps<{ product: Product }>()
   font-size: 18px;
 }
 
-.pcard-cat {
+.pcard-cat,
+.pcard-sold {
   font-size: 12px;
   color: var(--fawn-text-sub);
   white-space: nowrap;

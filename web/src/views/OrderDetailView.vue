@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { orderApi } from '@/api'
 import { fen2yuan, ORDER_STATUS_NAME, ORDER_STATUS_TAG, formatTime } from '@/utils/format'
 import { toast } from '@/utils/notify'
+import PayCountdown from '@/components/PayCountdown.vue'
 import type { Order } from '@/types'
 
 const route = useRoute()
@@ -88,6 +89,12 @@ async function confirm() {
     acting.value = false
   }
 }
+
+/** 倒计时归零:延迟队列取消有秒级滞后,稍等后拉取最新状态。 */
+async function onExpired() {
+  await load()
+  if (order.value?.status === 'pending_payment') setTimeout(load, 3000)
+}
 </script>
 
 <template>
@@ -101,7 +108,11 @@ async function confirm() {
           </el-tag>
           <p class="st-reason" v-if="order.status === 'canceled'">{{ order.cancel_reason }}</p>
           <p class="st-hint" v-else-if="order.status === 'pending_payment'">
-            请在 15 分钟内完成支付,超时订单将自动取消
+            <template v-if="order.pay_remaining_seconds">
+              剩余 <PayCountdown class="st-count" :seconds="order.pay_remaining_seconds" @expired="onExpired" />,
+              超时订单将自动取消
+            </template>
+            <template v-else>支付已超时,订单取消处理中</template>
           </p>
         </div>
         <div class="st-amount">

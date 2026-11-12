@@ -7,6 +7,12 @@ const routes: RouteRecordRaw[] = [
   { path: '/', name: 'home', component: () => import('@/views/HomeView.vue'), meta: { title: '小鹿童装' } },
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { title: '登录' } },
   {
+    path: '/categories',
+    name: 'categories',
+    component: () => import('@/views/CategoriesView.vue'),
+    meta: { title: '商品分类' },
+  },
+  {
     path: '/product/:id',
     name: 'product-detail',
     component: () => import('@/views/ProductDetailView.vue'),
@@ -20,6 +26,12 @@ const routes: RouteRecordRaw[] = [
     name: 'order-detail',
     component: () => import('@/views/OrderDetailView.vue'),
     meta: { title: '订单详情', auth: true },
+  },
+  {
+    path: '/addresses',
+    name: 'addresses',
+    component: () => import('@/views/AddressesView.vue'),
+    meta: { title: '收货地址', auth: true },
   },
   {
     path: '/admin',

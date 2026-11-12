@@ -58,10 +58,16 @@ export interface ProductPage {
   page_size: number
 }
 
+/** 热销商品:含累计销量(有效订单件数,无销量兜底时为 0)。 */
+export interface HotProduct extends Product {
+  sold: number
+}
+
 export interface HomePayload {
   categories: Category[]
   age_groups: { key: AgeGroup; name: string }[]
   recommended: Product[]
+  hot: HotProduct[]
 }
 
 export interface CartItem {
@@ -122,6 +128,34 @@ export interface Order {
   cancel_reason: string
   created_at: string
   items?: OrderItem[]
+  /** 待支付订单剩余支付秒数(服务端计算;其余状态无此字段) */
+  pay_remaining_seconds?: number
+}
+
+/** 收货地址簿条目。 */
+export interface Address {
+  id: number
+  user_id: number
+  receiver: string
+  phone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** 下单请求:省市区结构化(后端组合为地址快照)。 */
+export interface PlaceOrderBody {
+  receiver: string
+  phone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  remark?: string
 }
 
 export interface OrderPage {

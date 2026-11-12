@@ -1,56 +1,71 @@
 <script setup lang="ts">
-/** 结算页:收货信息表单 + 勾选商品清单 + 金额确认;提交后跳转订单详情。 */
+/** 结算页:收货地址(跳转地址页选择后回显)+ 商品清单 + 金额确认。 */
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
-import { orderApi } from '@/api'
+import { useCheckoutStore } from '@/stores/checkout'
+import { addressApi, orderApi } from '@/api'
 import { fen2yuan, AGE_GROUP_SHORT } from '@/utils/format'
 import { toast } from '@/utils/notify'
+import type { Address } from '@/types'
 
 const cartStore = useCartStore()
+const checkoutStore = useCheckoutStore()
 const router = useRouter()
 
-const form = ref({
-  receiver: '',
-  phone: '',
-  address: '',
-  remark: '',
-})
+const addresses = ref<Address[]>([])
+const remark = ref('')
 const submitting = ref(false)
 
 const items = computed(() => cartStore.selectedItems)
 const totalAmount = computed(() => cartStore.summary.selected_amount)
-
-onMounted(() => {
-  if (!cartStore.loaded) cartStore.fetch().catch(() => {})
+/** 当前生效地址:store 选中项(地址页带回)→ 校验仍存在,否则回落默认。 */
+const current = computed<Address | null>(() => {
+  const sel = checkoutStore.selectedAddress
+  if (sel && addresses.value.some(a => a.id === sel.id)) return sel
+  return addresses.value.find(a => a.is_default) ?? addresses.value[0] ?? null
 })
 
+onMounted(async () => {
+  if (!cartStore.loaded) cartStore.fetch().catch(() => {})
+  try {
+    addresses.value = await addressApi.list()
+  } catch {
+    /* 未登录等场景由路由守卫兜底 */
+  }
+})
+
+/** 跳转地址页选择(带 select 标记,地址页展示「选择」按钮)。 */
+function goSelect() {
+  router.push('/addresses?select=1')
+}
+
+function maskPhone(phone: string): string {
+  return phone.slice(0, 3) + '****' + phone.slice(7)
+}
+
 async function submit() {
-  const f = form.value
-  if (f.receiver.trim().length < 2) {
-    toast('请填写收货人姓名', 'warning')
-    return
-  }
-  if (!/^1\d{10}$/.test(f.phone)) {
-    toast('请填写 11 位手机号', 'warning')
-    return
-  }
-  if (f.address.trim().length < 2) {
-    toast('请填写收货地址', 'warning')
-    return
-  }
   if (items.value.length === 0) {
     toast('请先在购物车勾选商品', 'warning')
     return
   }
+  if (!current.value) {
+    toast('请先选择收货地址', 'warning')
+    return
+  }
+  const a = current.value
   submitting.value = true
   try {
     const { order_no } = await orderApi.place({
-      receiver: f.receiver.trim(),
-      phone: f.phone,
-      address: f.address.trim(),
-      remark: f.remark.trim() || undefined,
+      receiver: a.receiver,
+      phone: a.phone,
+      province: a.province,
+      city: a.city,
+      district: a.district,
+      detail: a.detail,
+      remark: remark.value.trim() || undefined,
     })
+    checkoutStore.clear()
     toast('下单成功,请在 15 分钟内完成支付')
     cartStore.fetch().catch(() => {})
     router.push(`/orders/${order_no}`)
@@ -69,27 +84,31 @@ async function submit() {
     </el-empty>
 
     <template v-else>
-      <!-- 收货信息 -->
+      <!-- 收货信息:已选地址回显 + 跳转地址页更换 -->
       <div class="card">
         <h2 class="section-title">收货信息</h2>
+
+        <div v-if="current" class="chosen" @click="goSelect">
+          <div class="chosen-main">
+            <p class="chosen-line1">
+              <b>{{ current.receiver }}</b>
+              <span class="chosen-phone">{{ maskPhone(current.phone) }}</span>
+              <el-tag v-if="current.is_default" size="small" effect="light" round>默认</el-tag>
+            </p>
+            <p class="chosen-line2">{{ current.province }} {{ current.city }} {{ current.district }}</p>
+            <p class="chosen-line3">{{ current.detail }}</p>
+          </div>
+          <span class="chosen-change">更换地址 ›</span>
+        </div>
+
+        <div v-else class="chosen-empty" @click="goSelect">
+          <el-icon :size="18"><Plus /></el-icon>
+          <span>请选择收货地址</span>
+        </div>
+
         <el-form label-width="82px" class="addr-form">
-          <el-form-item label="收货人" required>
-            <el-input v-model="form.receiver" placeholder="请输入收货人姓名" maxlength="32" />
-          </el-form-item>
-          <el-form-item label="手机号" required>
-            <el-input v-model="form.phone" placeholder="11 位手机号" maxlength="11" />
-          </el-form-item>
-          <el-form-item label="收货地址" required>
-            <el-input
-              v-model="form.address"
-              type="textarea"
-              :rows="2"
-              placeholder="省市区 + 详细地址,如:广东省茂名市茂南区幸福路 88 号"
-              maxlength="255"
-            />
-          </el-form-item>
           <el-form-item label="订单备注">
-            <el-input v-model="form.remark" placeholder="选填,如:请发顺丰" maxlength="200" />
+            <el-input v-model="remark" placeholder="选填,如:请发顺丰" maxlength="200" />
           </el-form-item>
         </el-form>
       </div>
@@ -137,6 +156,80 @@ async function submit() {
 
 .card {
   margin-bottom: 16px;
+}
+
+/* 已选地址回显卡片 */
+.chosen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid var(--fawn-primary);
+  background: var(--fawn-primary-bg);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+  margin-bottom: 14px;
+}
+
+.chosen:hover {
+  box-shadow: 0 4px 14px rgba(232, 115, 74, 0.15);
+}
+
+.chosen-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.chosen-line1 {
+  margin: 0 0 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.chosen-phone {
+  color: var(--fawn-text-sub);
+  font-size: 13px;
+}
+
+.chosen-line2,
+.chosen-line3 {
+  margin: 2px 0;
+  font-size: 13px;
+  color: var(--fawn-text-sub);
+}
+
+.chosen-line3 {
+  color: var(--fawn-text);
+}
+
+.chosen-change {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--fawn-primary);
+  white-space: nowrap;
+}
+
+/* 未选地址占位 */
+.chosen-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed var(--fawn-border);
+  border-radius: 10px;
+  padding: 22px;
+  color: var(--fawn-text-sub);
+  cursor: pointer;
+  margin-bottom: 14px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.chosen-empty:hover {
+  border-color: var(--fawn-primary);
+  color: var(--fawn-primary);
 }
 
 .addr-form {

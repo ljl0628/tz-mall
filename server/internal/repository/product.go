@@ -56,6 +56,54 @@ func (r *ProductRepo) Recommended(limit int) ([]model.Product, error) {
 	return list, err
 }
 
+// HotBySales 热销商品:按有效订单(已支付/已发货/已完成)件数倒序取前 N,
+// 仅返回仍上架的商品;solds 与 products 下标对齐,顺序保持销量排名。
+func (r *ProductRepo) HotBySales(limit int) ([]model.Product, []int64, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	var rows []struct {
+		ProductID uint64
+		Sold      int64
+	}
+	err := r.db.Table("order_items AS oi").
+		Select("oi.product_id, SUM(oi.quantity) AS sold").
+		Joins("JOIN orders o ON o.id = oi.order_id").
+		Where("o.status IN ?", []string{
+			model.OrderStatusPaid, model.OrderStatusShipped, model.OrderStatusCompleted,
+		}).
+		Group("oi.product_id").
+		Order("sold DESC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ProductID)
+	}
+	var prods []model.Product
+	if err := r.db.Where("id IN ? AND status = ?", ids, model.ProductStatusOn).
+		Find(&prods).Error; err != nil {
+		return nil, nil, err
+	}
+	byID := make(map[uint64]model.Product, len(prods))
+	for _, p := range prods {
+		byID[p.ID] = p
+	}
+	hot := make([]model.Product, 0, len(rows))
+	solds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if p, ok := byID[row.ProductID]; ok {
+			hot = append(hot, p)
+			solds = append(solds, row.Sold)
+		}
+	}
+	return hot, solds, nil
+}
+
 // GetByID 按 ID 查询商品(不限状态,业务层判断是否上架)。
 func (r *ProductRepo) GetByID(id uint64) (*model.Product, error) {
 	var p model.Product

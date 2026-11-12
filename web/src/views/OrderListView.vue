@@ -1,8 +1,9 @@
 <script setup lang="ts">
-/** 我的订单:状态 Tab + 分页列表。 */
+/** 我的订单:状态 Tab + 分页列表(待支付展示剩余支付倒计时)。 */
 import { ref, onMounted } from 'vue'
 import { orderApi } from '@/api'
 import { fen2yuan, ORDER_STATUS_NAME, ORDER_STATUS_TAG, formatTime } from '@/utils/format'
+import PayCountdown from '@/components/PayCountdown.vue'
 import type { Order, OrderStatus } from '@/types'
 
 const tabs: { key: string; label: string }[] = [
@@ -98,7 +99,10 @@ function itemCount(order: Order): number {
             </div>
             <div class="oc-amount">
               <span class="price">¥{{ fen2yuan(o.pay_amount) }}</span>
-              <span v-if="o.status === 'pending_payment'" class="oc-pay-hint">15 分钟内未支付自动取消</span>
+              <span v-if="o.status === 'pending_payment' && o.pay_remaining_seconds" class="oc-pay-hint">
+                <PayCountdown :seconds="o.pay_remaining_seconds" @expired="load" /> 后自动取消
+              </span>
+              <span v-else-if="o.status === 'pending_payment'" class="oc-pay-hint">支付超时处理中</span>
             </div>
           </div>
         </RouterLink>

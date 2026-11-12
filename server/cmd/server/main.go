@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -50,7 +51,7 @@ func main() {
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
-		&model.Order{}, &model.OrderItem{},
+		&model.Order{}, &model.OrderItem{}, &model.Address{},
 	); err != nil {
 		logger.Error(ctx, "AutoMigrate 失败", zap.Error(err))
 		os.Exit(1)
@@ -78,6 +79,7 @@ func main() {
 	productRepo := repository.NewProductRepo(db)
 	orderRepo := repository.NewOrderRepo(db)
 	cartRepo := repository.NewCartRepo(rdb)
+	addressRepo := repository.NewAddressRepo(db)
 	cacheRepo := repository.NewCache(rdb)
 	stockRepo := repository.NewCacheStock(rdb)
 	blackRepo := repository.NewBlacklist(rdb)
@@ -90,7 +92,9 @@ func main() {
 	authSvc := service.NewAuthService(userRepo, blackRepo, jwtMgr)
 	productSvc := service.NewProductService(productRepo, categoryRepo, cacheRepo)
 	cartSvc := service.NewCartService(cartRepo, productRepo, cacheRepo)
-	orderSvc := service.NewOrderService(orderRepo, cartRepo, productRepo, stockRepo, mqClient)
+	payTimeout := time.Duration(cfg.Order.PayTimeoutSeconds) * time.Second
+	orderSvc := service.NewOrderService(orderRepo, cartRepo, productRepo, stockRepo, mqClient, payTimeout)
+	addressSvc := service.NewAddressService(addressRepo)
 	adminSvc := service.NewAdminService(productRepo, categoryRepo, orderRepo, cacheRepo, stockRepo, userRepo, userState)
 
 	// 对象存储(可选):配置了 qiniu.* 才启用商品图上传
@@ -122,6 +126,7 @@ func main() {
 		Product: handler.NewProductHandler(productSvc),
 		Cart:    handler.NewCartHandler(cartSvc),
 		Order:   handler.NewOrderHandler(orderSvc),
+		Address: handler.NewAddressHandler(addressSvc),
 		Admin:   handler.NewAdminHandler(adminSvc, uploader),
 	})
 	srv := &http.Server{

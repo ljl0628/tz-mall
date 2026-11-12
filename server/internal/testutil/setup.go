@@ -79,7 +79,7 @@ func Setup(t *testing.T) (*gorm.DB, *redis.Client) {
 		}
 		dbErr = db.AutoMigrate(
 			&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
-			&model.Order{}, &model.OrderItem{},
+			&model.Order{}, &model.OrderItem{}, &model.Address{},
 		)
 	})
 	if dbErr != nil {

@@ -255,7 +255,7 @@ viper 封装在包内,业务代码禁止 import viper、禁止临时 `viper.GetS
 | POST | `/auth/login` | 登录,返回 JWT | - |
 | POST | `/auth/logout` | 登出(token 进黑名单) | 用户 |
 | GET | `/user/me` | 当前用户信息(含角色) | 用户 |
-| GET | `/home` | 首页聚合(推荐 + 分类) | - |
+| GET | `/home` | 首页聚合(推荐 + 热销榜 + 分类) | - |
 | GET | `/categories` | 分类列表 | - |
 | GET | `/products` | 商品列表:分页 / 分类 / 年龄段 / 关键词 | - |
 | GET | `/products/:id` | 商品详情(含各尺码库存;走 Redis 缓存) | - |
@@ -264,12 +264,16 @@ viper 封装在包内,业务代码禁止 import viper、禁止临时 `viper.GetS
 | PUT | `/cart/items/:field` | 改数量 / 勾选状态 | 用户 |
 | DELETE | `/cart/items/:field` | 删除条目 | 用户 |
 | PUT | `/cart/select-all` | 全选 / 取消全选 | 用户 |
-| POST | `/orders` | 下单(Redis 预扣 + MQ 异步落库) | 用户 |
-| GET | `/orders` | 我的订单(状态筛选 + 分页) | 用户 |
+| POST | `/orders` | 下单(省市区+详细地址必填,Redis 预扣 + MQ 异步落库) | 用户 |
+| GET | `/orders` | 我的订单(状态筛选 + 分页,待支付含剩余秒数) | 用户 |
 | GET | `/orders/:orderNo` | 订单详情 | 用户 |
 | POST | `/orders/:orderNo/pay` | 模拟支付 | 用户 |
 | POST | `/orders/:orderNo/cancel` | 主动取消(未支付,回补库存) | 用户 |
 | POST | `/orders/:orderNo/confirm` | 确认收货 | 用户 |
+| GET/POST | `/user/addresses` | 地址簿列表 / 新增(首条自动默认,上限 20) | 用户 |
+| PUT/DELETE | `/user/addresses/:id` | 编辑 / 删除(删默认后自动补位) | 用户 |
+| PUT | `/user/addresses/:id/default` | 设为默认(事务清除旧默认) | 用户 |
+| POST | `/admin/upload/image` | 商品图上传(七牛 Kodo 服务端中转,≤5MB jpg/png/webp) | 管理员 |
 | GET | `/admin/me` | 管理员信息 | 管理员 |
 | GET/POST | `/admin/products` | 商品列表 / 新增 | 管理员 |
 | PUT/DELETE | `/admin/products/:id` | 编辑(含 SKU 尺码)/ 删除 | 管理员 |
@@ -285,7 +289,7 @@ viper 封装在包内,业务代码禁止 import viper、禁止临时 `viper.GetS
 
 统一响应 `{ code, msg, data }`。错误码:`0` 成功;
 `40001` 参数错误、`40101` 未登录、`40301` 无权限、`40401` 不存在、`50001` 服务端错误;
-`60001-60015` 业务错误(用户名已存在 / 库存不足 / 订单状态冲突 / 账号已被禁用等,见 `server/pkg/resp/resp.go`)。
+`60001-60017` 业务错误(用户名已存在 / 库存不足 / 订单状态冲突 / 账号已被禁用 / 图片上传 / 地址簿等,见 `server/pkg/resp/resp.go`)。
 
 ## CI / CD
 

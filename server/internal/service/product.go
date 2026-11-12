@@ -92,6 +92,12 @@ func (s *ProductService) Detail(ctx context.Context, id uint64) (*model.ProductD
 	return d, nil
 }
 
+// HotProduct 热销商品(含累计销量)。
+type HotProduct struct {
+	model.Product
+	Sold int64 `json:"sold"` // 有效订单件数;无销量兜底最新上架时为 0
+}
+
 // HomePayload 首页聚合数据。
 type HomePayload struct {
 	Categories []model.Category `json:"categories"`
@@ -100,9 +106,11 @@ type HomePayload struct {
 		Name string `json:"name"`
 	} `json:"age_groups"`
 	Recommended []model.Product `json:"recommended"`
+	Hot         []HotProduct    `json:"hot"`
 }
 
-// Home 首页数据(缓存 10 分钟,商品/分类变更时主动失效)。
+// Home 首页数据(缓存 10 分钟,商品/分类变更时主动失效;
+// 销量变化不主动失效,由 TTL 兜底刷新)。
 func (s *ProductService) Home(ctx context.Context) (*HomePayload, error) {
 	var out HomePayload
 	if ok, err := s.cache.GetHome(ctx, &out); err == nil && ok {
@@ -116,9 +124,37 @@ func (s *ProductService) Home(ctx context.Context) (*HomePayload, error) {
 	if err != nil {
 		return nil, err
 	}
-	out = HomePayload{Categories: cats, AgeGroups: model.AgeGroups, Recommended: rec}
+	out = HomePayload{
+		Categories:  cats,
+		AgeGroups:   model.AgeGroups,
+		Recommended: rec,
+		Hot:         s.hotProducts(8),
+	}
 	_ = s.cache.SetHome(ctx, out)
 	return &out, nil
+}
+
+// hotProducts 热销榜:有效订单销量倒序;尚无成交时兜底为最新上架(销量记 0),
+// 保证首页栏目不为空。
+func (s *ProductService) hotProducts(limit int) []HotProduct {
+	prods, solds, err := s.products.HotBySales(limit)
+	if err != nil || len(prods) == 0 {
+		fallback, _, ferr := s.products.List(model.ProductFilter{Page: 1, PageSize: limit, OnShelfOnly: true})
+		if ferr != nil || len(fallback) == 0 {
+			return nil
+		}
+		prods = fallback
+		solds = nil
+	}
+	out := make([]HotProduct, 0, len(prods))
+	for i, p := range prods {
+		var sold int64
+		if i < len(solds) {
+			sold = solds[i]
+		}
+		out = append(out, HotProduct{Product: p, Sold: sold})
+	}
+	return out
 }
 
 // Categories 全部分类。

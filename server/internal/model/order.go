@@ -43,6 +43,11 @@ type Order struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	Items        []OrderItem `json:"items,omitempty"`
+
+	// PayRemainingSeconds Remaining payment seconds (computed field, not stored in DB):
+	// service layer computes the value for pending-payment orders based on created_at + pay_timeout,
+	// omitempty hides it for other statuses or when timeout is reached (0).
+	PayRemainingSeconds int `gorm:"-" json:"pay_remaining_seconds,omitempty"`
 }
 
 // TableName 显式表名。
