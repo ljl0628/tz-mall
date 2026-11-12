@@ -1,5 +1,5 @@
 /** API 模块:按领域拆分的接口封装。 */
-import { http } from './request'
+import { http, httpUpload } from './request'
 import type {
   CartView,
   Category,
@@ -85,6 +85,12 @@ export interface AdminProductQuery extends ProductQuery {
 }
 
 export const adminApi = {
+  /** 上传商品图到七牛(服务端中转),返回 { url, key, content_type, size } */
+  uploadImage: (file: File) =>
+    httpUpload.post<{ url: string; key: string; content_type: string; size: number }>(
+      '/admin/upload/image',
+      file,
+    ),
   listProducts: (q: AdminProductQuery) => {
     const p = new URLSearchParams()
     Object.entries(q).forEach(([k, v]) => {

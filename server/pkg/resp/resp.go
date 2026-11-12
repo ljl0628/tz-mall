@@ -34,6 +34,7 @@ const (
 	CodeSelfDelete         = 60011 // 管理员不能删除自己
 	CodeAdminExists        = 60012 // 管理员账号已存在
 	CodeUserDisabled       = 60013 // 账号已被禁用
+	CodeImageUpload        = 60014 // 图片上传失败(存储未配置/类型/大小不符)
 	CodeUserNotFound       = 60014 // 用户不存在
 	CodeSelfOp             = 60015 // 不能对自己执行该操作
 )

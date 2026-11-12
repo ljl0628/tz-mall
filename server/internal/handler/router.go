@@ -80,6 +80,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 	admin := api.Group("/admin", middleware.JWTAuth(d.JWT, d.Black, d.Guard), middleware.AdminRequired())
 	{
 		admin.GET("/me", d.Admin.Me)
+		admin.POST("/upload/image", d.Admin.UploadImage)
 		admin.GET("/products", d.Admin.ListProducts)
 		admin.POST("/products", d.Admin.CreateProduct)
 		admin.PUT("/products/:id", d.Admin.UpdateProduct)

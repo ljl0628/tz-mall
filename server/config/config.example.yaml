@@ -50,3 +50,15 @@ log:
 order:
   pay_timeout_seconds: 900 # 未支付自动取消时间(15 分钟,同时是延迟队列 TTL)
   max_retry: 3             # MQ 消费失败最大重试次数,超限进入停车队列
+
+# 对象存储(可选):整体不配置则商品图上传接口返回明确业务错误,其余功能不受影响。
+# 一旦配置,access_key/secret_key/bucket/domain/region 全部必填。
+# 环境变量映射:APP_QINIU_ACCESS_KEY / APP_QINIU_SECRET_KEY / APP_QINIU_BUCKET /
+#   APP_QINIU_DOMAIN / APP_QINIU_REGION / APP_QINIU_USE_HTTPS
+qiniu:
+  access_key: ""    # 七牛 AccessKey(个人中心 → 密钥管理)
+  secret_key: ""    # 七牛 SecretKey,建议由 APP_QINIU_SECRET_KEY 注入
+  bucket: ""        # 存储空间名,如 fawm-mall
+  domain: ""        # 外链域名(带 scheme),如 https://static.ljl0628.cn
+  region: z0        # 存储区域:z0 华东 | z1 华北 | z2 华南 | cn-east-2 华东-浙江2 | na0 北美 | as0 东南亚
+  use_https: true   # 上传 API 是否走 HTTPS(默认 true)

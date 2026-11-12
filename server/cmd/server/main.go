@@ -23,6 +23,7 @@ import (
 	"fawn-mall/pkg/config"
 	"fawn-mall/pkg/jwtx"
 	"fawn-mall/pkg/logger"
+	"fawn-mall/pkg/storage"
 )
 
 func main() {
@@ -92,6 +93,17 @@ func main() {
 	orderSvc := service.NewOrderService(orderRepo, cartRepo, productRepo, stockRepo, mqClient)
 	adminSvc := service.NewAdminService(productRepo, categoryRepo, orderRepo, cacheRepo, stockRepo, userRepo, userState)
 
+	// 对象存储(可选):配置了 qiniu.* 才启用商品图上传
+	var uploader storage.Uploader
+	if cfg.Qiniu.AccessKey != "" {
+		uploader, err = storage.NewQiniu(cfg.Qiniu)
+		if err != nil {
+			logger.Error(ctx, "七牛对象存储初始化失败", zap.Error(err))
+			os.Exit(1)
+		}
+		logger.Info(ctx, "七牛对象存储已启用", zap.String("bucket", cfg.Qiniu.Bucket), zap.String("domain", cfg.Qiniu.Domain))
+	}
+
 	// 5. MQ 消费者注册 + 后台运行(自动重连)
 	mqClient.RegisterHandler(mq.QueueOrderCreate, orderSvc.HandleOrderCreate)
 	mqClient.RegisterHandler(mq.QueueOrderCancel, orderSvc.HandleOrderCancel)
@@ -110,7 +122,7 @@ func main() {
 		Product: handler.NewProductHandler(productSvc),
 		Cart:    handler.NewCartHandler(cartSvc),
 		Order:   handler.NewOrderHandler(orderSvc),
-		Admin:   handler.NewAdminHandler(adminSvc),
+		Admin:   handler.NewAdminHandler(adminSvc, uploader),
 	})
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

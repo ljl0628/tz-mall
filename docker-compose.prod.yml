@@ -78,6 +78,12 @@ services:
       APP_REDIS_ADDR: redis:6379
       APP_RABBITMQ_URL: amqp://${RABBITMQ_USER:-fawn}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       APP_LOG_FORMAT: json # JSON 落文件(挂载持久化),stdout 安静
+      # 七牛对象存储(可选):AK/SK 不配则图片上传接口返回业务错误,其余功能不受影响
+      APP_QINIU_ACCESS_KEY: ${QINIU_AK:-}
+      APP_QINIU_SECRET_KEY: ${QINIU_SK:-}
+      APP_QINIU_BUCKET: ${QINIU_BUCKET:-}
+      APP_QINIU_DOMAIN: ${QINIU_DOMAIN:-}
+      APP_QINIU_REGION: ${QINIU_REGION:-}
     ports:
       - "127.0.0.1:${SERVER_PORT:-18080}:8080" # 健康检查/直连调试,公网不可达
     volumes:

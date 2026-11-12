@@ -104,3 +104,50 @@ export const http = {
   delete: <T>(path: string, body?: unknown, opts?: { quiet?: boolean }) =>
     request<T>('DELETE', path, body, opts),
 }
+
+/**
+ * 文件上传(multipart):单独走 fetch FormData,不复用 JSON 管道。
+ * 响应仍是统一 { code, msg, data } 结构,复用同一套解析逻辑。
+ */
+async function uploadRequest<T>(path: string, file: File): Promise<T> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  // 不手动设 Content-Type,让浏览器携带 multipart boundary
+
+  let resp: Response
+  try {
+    resp = await fetch(BASE_URL + path, { method: 'POST', headers, body: fd })
+  } catch {
+    import('../utils/notify').then(m => m.toast('网络异常,请检查网络后重试', 'error'))
+    throw new ApiError(-1, '网络异常')
+  }
+  if (resp.status === 401 || resp.status === 403) {
+    clearToken()
+    redirectToLogin()
+    throw new ApiError(40101, '请先登录')
+  }
+  let parsed: ApiBody<T>
+  try {
+    parsed = (await resp.json()) as ApiBody<T>
+  } catch {
+    import('../utils/notify').then(m => m.toast('服务响应异常', 'error'))
+    throw new ApiError(-1, '服务响应异常')
+  }
+  if (parsed.code !== 0) {
+    if (parsed.code === 40101) {
+      clearToken()
+      redirectToLogin()
+    }
+    import('../utils/notify').then(m => m.toast(parsed.msg || '上传失败', 'error'))
+    throw new ApiError(parsed.code, parsed.msg)
+  }
+  return parsed.data
+}
+
+export const httpUpload = {
+  /** POST multipart,字段名固定为 file,与服务端 FormFile("file") 对应 */
+  post: <T>(path: string, file: File) => uploadRequest<T>(path, file),
+}

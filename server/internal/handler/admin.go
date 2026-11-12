@@ -9,15 +9,20 @@ import (
 	"fawn-mall/internal/model"
 	"fawn-mall/internal/service"
 	"fawn-mall/pkg/resp"
+	"fawn-mall/pkg/storage"
 )
 
 // AdminHandler 管理端接口(需管理员角色)。
+// uploader 为 nil 表示未配置对象存储,上传接口返回明确业务错误,其余功能不受影响。
 type AdminHandler struct {
-	admin *service.AdminService
+	admin    *service.AdminService
+	uploader storage.Uploader
 }
 
 // NewAdminHandler 构造。
-func NewAdminHandler(a *service.AdminService) *AdminHandler { return &AdminHandler{admin: a} }
+func NewAdminHandler(a *service.AdminService, up storage.Uploader) *AdminHandler {
+	return &AdminHandler{admin: a, uploader: up}
+}
 
 // ListProducts GET /admin/products
 func (h *AdminHandler) ListProducts(c *gin.Context) {

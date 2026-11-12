@@ -41,6 +41,7 @@ type Config struct {
 	JWT      JWTConf      `mapstructure:"jwt"`
 	Log      LogConf      `mapstructure:"log"`
 	Order    OrderConf    `mapstructure:"order"`
+	Qiniu    QiniuConf    `mapstructure:"qiniu"`
 }
 
 // ServerConf HTTP 服务。
@@ -99,6 +100,17 @@ type LogConf struct {
 type OrderConf struct {
 	PayTimeoutSeconds int `mapstructure:"pay_timeout_seconds"`
 	MaxRetry          int `mapstructure:"max_retry"`
+}
+
+// QiniuConf 七牛云 Kodo 对象存储(商品图上传,可选功能)。
+// 四个字段要么全空(功能关闭,上传接口返回明确错误),要么全配。
+type QiniuConf struct {
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	Bucket    string `mapstructure:"bucket"`
+	Domain    string `mapstructure:"domain"` // 外链域名,带 scheme,如 https://static.example.cn
+	Region    string `mapstructure:"region"` // z0 华东 / z1 华北 / z2 华南 / cn-east-2 / na0 / as0
+	UseHTTPS  bool   `mapstructure:"use_https"`
 }
 
 // IsProd 是否生产环境。
@@ -293,6 +305,33 @@ func (c *Config) Validate() error {
 		add("order.max_retry: 不能为负数,当前 %d", c.Order.MaxRetry)
 	}
 
+	// 七牛对象存储:全空 = 功能关闭;启用则必填项齐全且格式合法。
+	// 启用判定只看 AK/SK/bucket/domain 四项(凭证与资源标识):
+	// region/use_https 在 example 里有默认值(z0/true),不算启用信号,
+	// 否则仅用默认模板的容器会被误判"已启用但 AK 为空"而拒绝启动。
+	if q := c.Qiniu; q.AccessKey != "" || q.SecretKey != "" || q.Bucket != "" || q.Domain != "" {
+		switch {
+		case q.AccessKey == "":
+			add("qiniu.access_key: 已启用七牛存储但为空")
+		case q.SecretKey == "":
+			add("qiniu.secret_key: 已启用七牛存储但为空")
+		case q.Bucket == "":
+			add("qiniu.bucket: 已启用七牛存储但为空")
+		case q.Domain == "":
+			add("qiniu.domain: 已启用七牛存储但为空")
+		case !strings.HasPrefix(q.Domain, "http://") && !strings.HasPrefix(q.Domain, "https://"):
+			add("qiniu.domain: 必须带 scheme,如 https://static.example.cn(当前 %q)", q.Domain)
+		case q.Region == "":
+			add("qiniu.region: 已启用七牛存储但为空(可选 z0/z1/z2/cn-east-2/na0/as0)")
+		default:
+			switch q.Region {
+			case "z0", "z1", "z2", "cn-east-2", "na0", "as0":
+			default:
+				add("qiniu.region: 仅支持 z0/z1/z2/cn-east-2/na0/as0(当前 %q)", q.Region)
+			}
+		}
+	}
+
 	// 密钥类:任何环境都不允许空值(不做静默兜底)
 	if c.JWT.Secret == "" {
 		add("jwt.secret: 不能为空(生产环境由 APP_JWT_SECRET 注入)")
@@ -389,10 +428,14 @@ func maskURL(raw string) string {
 
 // MaskedSummary 返回脱敏后的生效配置(用于启动日志,密码类只留前几位)。
 func (c *Config) MaskedSummary() string {
+	qiniu := "(关闭)"
+	if c.Qiniu.AccessKey != "" {
+		qiniu = fmt.Sprintf("ak=%s bucket=%s@%s region=%s", maskStr(c.Qiniu.AccessKey, 4), c.Qiniu.Bucket, c.Qiniu.Domain, c.Qiniu.Region)
+	}
 	return fmt.Sprintf(
 		"env=%s server.port=%d(%s) db=%s:%d/%s user=%s password=%s pool=%d/%d/%s "+
 			"redis=%s(db=%d,password=%s) rabbitmq=%s reconnect=%s op_timeout=%s "+
-			"jwt.secret=%s expire=%s log=%s/%s→%s(%dMB×%d,%dd,%v) order.pay_timeout=%ds retry=%d",
+			"jwt.secret=%s expire=%s log=%s/%s→%s(%dMB×%d,%dd,%v) order.pay_timeout=%ds retry=%d qiniu=%s",
 		c.Env, c.Server.Port, c.Server.Mode,
 		c.DB.Host, c.DB.Port, c.DB.Name, c.DB.User, maskStr(c.DB.Password, 2),
 		c.DB.MaxOpenConns, c.DB.MaxIdleConns, c.DB.ConnMaxLifetime,
@@ -400,6 +443,6 @@ func (c *Config) MaskedSummary() string {
 		maskURL(c.RabbitMQ.URL), c.RabbitMQ.ReconnectInterval, c.RabbitMQ.OpTimeout,
 		maskStr(c.JWT.Secret, 6), c.JWT.Expire,
 		c.Log.Level, c.Log.Format, c.Log.Dir, c.Log.MaxSizeMB, c.Log.MaxBackups, c.Log.MaxAgeDays, c.Log.Compress,
-		c.Order.PayTimeoutSeconds, c.Order.MaxRetry,
+		c.Order.PayTimeoutSeconds, c.Order.MaxRetry, qiniu,
 	)
 }

@@ -122,6 +122,36 @@ function removeSkuRow(i: number) {
   form.data.skus.splice(i, 1)
 }
 
+const uploading = ref(false)
+
+/** 上传前预检:类型与大小(服务端仍按魔数强校验,这里只挡明显错误)。 */
+function beforeImageUpload(file: File): boolean {
+  const okTypes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!okTypes.includes(file.type)) {
+    toast('仅支持 jpg/png/webp 图片', 'warning')
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    toast('图片不能超过 5MB', 'warning')
+    return false
+  }
+  return true
+}
+
+/** 自定义上传:后端中转到七牛,成功后 URL 自动回填 image 字段。 */
+async function doUploadImage(opt: { file: File }): Promise<void> {
+  uploading.value = true
+  try {
+    const data = await adminApi.uploadImage(opt.file)
+    form.data.image = data.url
+    toast('图片上传成功', 'success')
+  } catch {
+    // request 层已统一 toast 错误信息
+  } finally {
+    uploading.value = false
+  }
+}
+
 async function save() {
   const f = form.data
   if (!f.name || f.name.length < 2) return toast('请填写商品名称(至少 2 字)', 'warning')
@@ -328,7 +358,29 @@ function onPageChange(p: number) {
           </el-form-item>
         </div>
         <el-form-item label="商品图">
-          <el-input v-model="form.data.image" placeholder="图片 URL(留空自动生成占位图)" />
+          <div class="img-field">
+            <el-upload
+              class="img-upload"
+              accept="image/jpeg,image/png,image/webp"
+              :show-file-list="false"
+              :before-upload="beforeImageUpload"
+              :http-request="doUploadImage"
+            >
+              <div v-loading="uploading" class="img-box" element-loading-text="上传中">
+                <img v-if="form.data.image" :src="form.data.image" class="img-preview" alt="商品图预览" />
+                <div v-else class="img-empty">+<br />上传图片</div>
+              </div>
+            </el-upload>
+            <div class="img-input">
+              <el-input
+                v-model="form.data.image"
+                size="small"
+                placeholder="图片 URL(上传自动回填,也可手动粘贴;留空自动生成占位图)"
+                clearable
+              />
+              <p class="img-tip">jpg/png/webp,单张 ≤ 5MB,上传后 URL 自动填入并可预览</p>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="商品描述">
           <el-input v-model="form.data.description" type="textarea" :rows="3" maxlength="2000" />
@@ -365,6 +417,59 @@ function onPageChange(p: number) {
 
 .admin-head h2 {
   margin: 0;
+}
+
+/* 商品图上传:左预览框 + 右 URL 输入 */
+.img-field {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.img-upload .el-upload {
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.img-upload .el-upload:hover {
+  border-color: var(--el-color-primary);
+}
+
+.img-box {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-fill-color-light);
+}
+
+.img-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.img-empty {
+  text-align: center;
+  line-height: 1.5;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.img-input {
+  flex: 1;
+  padding-top: 4px;
+}
+
+.img-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .toolbar {

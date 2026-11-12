@@ -204,6 +204,14 @@ docker logs blog-nginx --tail 20                        # 无证书/DNS 报错
 | `SERVER_PORT` / `WEB_PORT` / `REDIS_PORT` / `MQ_MGMT_PORT` | 本机端口覆盖(默认 18080/18090/16379/25672) | 仅与其他项目相撞时改 |
 | `RABBITMQ_PASSWORD` | MQ 口令 | 随机 ≥24 位 |
 | `JWT_SECRET` | 登录态签名密钥 | 随机 ≥32 字节(启动硬校验) |
+| `QINIU_AK` / `QINIU_SK` / `QINIU_BUCKET` / `QINIU_DOMAIN` / `QINIU_REGION` | 七牛对象存储(商品图上传,可选) | 整体留空=功能关闭;启用则五项全填 |
+
+**七牛对象存储(商品图上传)**:管理端上传图片走「浏览器 → 后端中转 → 七牛 Kodo」,
+数据库只存外链 URL(如 `https://static.ljl0628.cn/products/20260112/xxx.jpg`)。
+启用步骤:七牛建空间(记下存储区域代码)→ 空间绑定加速域名并 CNAME → 把
+`QINIU_*` 五项写入服务器 `.env` → `docker compose -f docker-compose.prod.yml up -d server`
+重建生效。区域代码:`z0` 华东 / `z1` 华北 / `z2` 华南 / `cn-east-2` 华东-浙江2 /
+`na0` 北美 / `as0` 东南亚。未配置时上传接口返回业务码 60014(前端明确提示),其余功能不受影响。
 
 **与其他项目的隔离**:本项目独立 compose project(`fawn-mall`)、独立 Docker 网络
 (default)、独立数据卷、容器名前缀 `fawn-`;CD 的 `up -d --remove-orphans` 只作用于
