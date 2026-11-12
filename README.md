@@ -143,6 +143,16 @@ task web:dev                # 前端 :5173,/api 代理到 8080
 
 ## 核心设计
 
+### 0. 表结构迁移:生产 golang-migrate / 开发 AutoMigrate
+
+| 环境 | 方式 | 说明 |
+|---|---|---|
+| prod | `server/migrations/` 内嵌 SQL(golang-migrate) | 启动时按 `schema_migrations` 版本表增量执行,可追溯;后续演进追加 `000002+`,不改基线 |
+| dev / test | GORM `AutoMigrate` | 零依赖起步;testutil 对测试库同样处理 |
+
+入口见 `cmd/server/main.go` 的 `migrateSchema`(`APP_ENV=prod` 走 `pkg/dbmigrate.Up`)。
+基线 `000001_init` 使用 `CREATE TABLE IF NOT EXISTS`,兼容先有表后引入迁移的存量库。
+
 ### 1. 防超卖:Redis Lua 预扣 → MQ 异步 → MySQL 条件更新
 
 超卖的经典成因是「多进程同时读到同一份库存再各自扣减」。本项目三段式防护:

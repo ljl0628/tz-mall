@@ -14,6 +14,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"fawn-mall/internal/handler"
 	"fawn-mall/internal/model"
@@ -22,10 +23,23 @@ import (
 	"fawn-mall/internal/seed"
 	"fawn-mall/internal/service"
 	"fawn-mall/pkg/config"
+	"fawn-mall/pkg/dbmigrate"
 	"fawn-mall/pkg/jwtx"
 	"fawn-mall/pkg/logger"
 	"fawn-mall/pkg/storage"
 )
+
+// migrateSchema 表结构同步:生产执行 golang-migrate 版本化迁移,其余环境 AutoMigrate。
+func migrateSchema(ctx context.Context, cfg *config.Config, db *gorm.DB) error {
+	if cfg.IsProd() {
+		logger.Info(ctx, "生产环境:执行 golang-migrate 版本化迁移")
+		return dbmigrate.Up(ctx, cfg.DSN())
+	}
+	return db.AutoMigrate(
+		&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
+		&model.Order{}, &model.OrderItem{}, &model.Address{},
+	)
+}
 
 func main() {
 	// 1. 配置:viper 加载(环境变量 > config.{env}.yaml > config.yaml > 默认值),启动即强校验
@@ -43,17 +57,16 @@ func main() {
 	defer stop()
 	logger.Info(ctx, "配置加载完成(密码已脱敏)", zap.String("effective", cfg.MaskedSummary()))
 
-	// 2. MySQL:连接 + AutoMigrate + 种子数据
+	// 2. MySQL:连接 + 表结构同步 + 种子数据
+	// 生产走 golang-migrate 版本化迁移(server/migrations,可追溯可回滚);
+	// 开发/测试沿用 GORM AutoMigrate,本地零依赖起步。
 	db, err := repository.NewDB(cfg)
 	if err != nil {
 		logger.Error(ctx, "MySQL 初始化失败", zap.Error(err))
 		os.Exit(1)
 	}
-	if err := db.AutoMigrate(
-		&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
-		&model.Order{}, &model.OrderItem{}, &model.Address{},
-	); err != nil {
-		logger.Error(ctx, "AutoMigrate 失败", zap.Error(err))
+	if err := migrateSchema(ctx, cfg, db); err != nil {
+		logger.Error(ctx, "表结构迁移失败", zap.Error(err))
 		os.Exit(1)
 	}
 	logger.Info(ctx, "MySQL 已连接,表结构已同步")
