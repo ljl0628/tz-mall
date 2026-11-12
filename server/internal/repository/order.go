@@ -119,10 +119,28 @@ func (r *OrderRepo) markStatusCond(orderNo, from, to string, sets map[string]any
 	return res.RowsAffected == 1, nil
 }
 
-// MarkPaid 待支付 → 已支付(模拟支付成功时调用,并发安全)。
-func (r *OrderRepo) MarkPaid(orderNo string) (bool, error) {
-	return r.markStatusCond(orderNo, model.OrderStatusPendingPayment, model.OrderStatusPaid,
-		map[string]any{"pay_time": time.Now()})
+// MarkPaidWithFlow 事务:待支付 → 已支付,并在同事务写入进账流水,
+// 保证支付状态与流水账实一致(要么同时落库,要么都不落)。
+// 条件更新保证与超时取消并发时只有一方成功;未更新成功返回 false,不写流水。
+func (r *OrderRepo) MarkPaidWithFlow(orderNo string, flow *model.PayFlow) (bool, error) {
+	var paid bool
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Order{}).
+			Where("order_no = ? AND status = ?", orderNo, model.OrderStatusPendingPayment).
+			Updates(map[string]any{"status": model.OrderStatusPaid, "pay_time": time.Now()})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil // 已支付过 / 已取消(可能刚好被延迟任务取消)
+		}
+		if err := tx.Create(flow).Error; err != nil {
+			return err
+		}
+		paid = true
+		return nil
+	})
+	return paid, err
 }
 
 // MarkShipped 已支付 → 已发货。
@@ -138,7 +156,7 @@ func (r *OrderRepo) MarkCompleted(orderNo string) (bool, error) {
 }
 
 // MarkCanceled 待支付 → 已取消(用户取消 / 超时取消)。并发安全:
-// 与 MarkPaid 竞争时只有一方能更新成功。
+// 与支付(MarkPaidWithFlow)竞争时只有一方能更新成功。
 func (r *OrderRepo) MarkCanceled(orderNo, reason string) (bool, error) {
 	return r.markStatusCond(orderNo, model.OrderStatusPendingPayment, model.OrderStatusCanceled,
 		map[string]any{"cancel_time": time.Now(), "cancel_reason": reason})

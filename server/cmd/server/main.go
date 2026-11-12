@@ -38,6 +38,7 @@ func migrateSchema(ctx context.Context, cfg *config.Config, db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.User{}, &model.Category{}, &model.Product{}, &model.SKU{},
 		&model.Order{}, &model.OrderItem{}, &model.Address{},
+		&model.PayFlow{}, &model.RefundOrder{}, &model.DailyStatement{},
 	)
 }
 

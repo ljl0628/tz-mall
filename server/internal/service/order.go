@@ -205,6 +205,16 @@ func GenOrderNo() string {
 	return "FK" + time.Now().Format("20060102150405") + randomHex(3)
 }
 
+// GenFlowNo 生成资金流水号:LS + yyyyMMddHHmmss + 6 位随机十六进制。
+func GenFlowNo() string {
+	return "LS" + time.Now().Format("20060102150405") + randomHex(3)
+}
+
+// GenRefundNo 生成退款单号:TK + yyyyMMddHHmmss + 6 位随机十六进制。
+func GenRefundNo() string {
+	return "TK" + time.Now().Format("20060102150405") + randomHex(3)
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -224,13 +234,23 @@ func toMsgItems(items []model.OrderItem) []mq.MsgItem {
 
 // ---------- 支付 / 取消 / 确认收货 ----------
 
-// Pay 模拟支付:待支付 → 已支付。与超时取消并发时,条件更新保证只有一方成功。
+// Pay 模拟支付:待支付 → 已支付,同事务写入一笔进账流水(资金账本)。
+// 与超时取消并发时,条件更新保证只有一方成功。
 func (s *OrderService) Pay(ctx context.Context, userID uint64, orderNo string) (*model.Order, error) {
 	order, err := s.getOwnedOrder(orderNo, userID, true)
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.orders.MarkPaid(orderNo)
+	flow := &model.PayFlow{
+		FlowNo:    GenFlowNo(),
+		OrderNo:   orderNo,
+		UserID:    userID,
+		Direction: model.FlowDirectionIn,
+		BizType:   model.FlowBizPay,
+		Amount:    order.PayAmount,
+		Status:    model.FlowStatusSuccess, // 模拟支付即时成功
+	}
+	ok, err := s.orders.MarkPaidWithFlow(orderNo, flow)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +258,8 @@ func (s *OrderService) Pay(ctx context.Context, userID uint64, orderNo string) (
 		return nil, resp.ErrOrderStatus // 已支付过 / 已取消(可能刚好被延迟任务取消)
 	}
 	logger.Info(ctx, "模拟支付成功", zap.String("order_no", orderNo),
-		zap.Uint64("user_id", userID), zap.Int64("amount", order.PayAmount))
+		zap.Uint64("user_id", userID), zap.Int64("amount", order.PayAmount),
+		zap.String("flow_no", flow.FlowNo))
 	return s.orders.GetByOrderNo(orderNo, true)
 }
 
@@ -382,7 +403,8 @@ func (s *OrderService) getOwnedOrder(orderNo string, userID uint64, withItems bo
 func validOrderStatus(s string) bool {
 	switch s {
 	case model.OrderStatusPendingPayment, model.OrderStatusPaid,
-		model.OrderStatusShipped, model.OrderStatusCompleted, model.OrderStatusCanceled:
+		model.OrderStatusShipped, model.OrderStatusCompleted, model.OrderStatusCanceled,
+		model.OrderStatusRefunded:
 		return true
 	}
 	return false

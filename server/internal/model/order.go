@@ -6,12 +6,14 @@ import "time"
 //
 //	pending_payment(待支付) → paid(已支付) → shipped(已发货) → completed(已完成)
 //	pending_payment → canceled(已取消:用户取消 / 超时未支付)
+//	paid → refunded(已退款:管理员售后退款,资金流水记一笔出账)
 const (
 	OrderStatusPendingPayment = "pending_payment"
 	OrderStatusPaid           = "paid"
 	OrderStatusShipped        = "shipped"
 	OrderStatusCompleted      = "completed"
 	OrderStatusCanceled       = "canceled"
+	OrderStatusRefunded       = "refunded"
 )
 
 // OrderStatusName 订单状态中文名(前端时间轴展示备用)。
@@ -21,6 +23,7 @@ var OrderStatusName = map[string]string{
 	OrderStatusShipped:        "已发货",
 	OrderStatusCompleted:      "已完成",
 	OrderStatusCanceled:       "已取消",
+	OrderStatusRefunded:       "已退款",
 }
 
 // Order 订单主表。
@@ -40,6 +43,7 @@ type Order struct {
 	FinishTime   *time.Time  `json:"finish_time"`
 	CancelTime   *time.Time  `json:"cancel_time"`
 	CancelReason string      `gorm:"size:128" json:"cancel_reason"`
+	RefundTime   *time.Time  `json:"refund_time"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	Items        []OrderItem `json:"items,omitempty"`
